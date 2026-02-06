@@ -2,19 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Heart, Timer, User } from "lucide-react";
-
-interface NFT {
-    id: string;
-    name: string;
-    image: string;
-    price?: string;
-    rentalPrice?: string;
-    currency: string;
-    collection: string;
-    creator: string;
-    timeLeft?: string;
-    likes?: number;
-}
+import { NFT } from "../../types";
 
 interface NFTCardProps {
     nft: NFT;
@@ -24,7 +12,7 @@ interface NFTCardProps {
 
 const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
     return (
-        <Card className="group relative overflow-hidden border-0 bg-card/40 hover:bg-card/60 transition-all duration-500 hover:shadow-2xl hover:shadow-primary/10 hover:-translate-y-2">
+        <Card className="group relative overflow-hidden border border-indigo-500/20 bg-gradient-to-b from-[#1a1b2e] to-[#16172b] hover:border-indigo-500/50 transition-all duration-500 hover:shadow-2xl hover:shadow-indigo-500/20 hover:-translate-y-2">
 
             {/* Image Section */}
             <div className="relative aspect-square overflow-hidden rounded-t-xl">
@@ -77,7 +65,7 @@ const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
                 <div>
                     <div className="flex justify-between items-start">
                         <div>
-                            <p className="text-xs font-medium text-primary mb-1">{nft.collection}</p>
+                            <p className="text-xs font-medium text-cyan-400 mb-1">{nft.collection}</p>
                             <h3 className="font-semibold text-lg leading-tight text-white group-hover:text-primary transition-colors">
                                 {nft.name}
                             </h3>
@@ -89,7 +77,7 @@ const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
                             </div>
                         )}
                     </div>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="mt-2 flex items-center gap-2 text-xs text-blue-300">
                         <User className="w-3 h-3" />
                         <span className="truncate max-w-[150px]">Created by {nft.creator}</span>
                     </div>
@@ -102,9 +90,9 @@ const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
 
                     {status === 'listing' && (
                         <div className="flex flex-col gap-1">
-                            <span className="text-xs text-muted-foreground">Price</span>
+                            <span className="text-xs font-medium text-pink-400">Price</span>
                             <div className="flex items-baseline gap-1">
-                                <span className="text-lg font-bold text-white">{nft.price}</span>
+                                <span className="text-lg font-bold text-green-400">{nft.price}</span>
                                 <span className="text-xs font-medium text-primary">{nft.currency}</span>
                             </div>
                         </div>
@@ -127,7 +115,7 @@ const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
                     {/* Action Button */}
                     <div className="flex-1 max-w-[120px]">
                         {status === 'listing' && (
-                            <Button size="sm" className="w-full" onClick={() => onAction?.('rent', nft.id)}>
+                            <Button size="sm" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-lg shadow-indigo-500/25 border-0" onClick={() => onAction?.('rent', nft.id)}>
                                 Rent Now
                             </Button>
                         )}

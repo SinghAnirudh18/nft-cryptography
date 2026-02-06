@@ -1,9 +1,9 @@
 /* Application-level helper styles (kept small and focused) */
 
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .logo {

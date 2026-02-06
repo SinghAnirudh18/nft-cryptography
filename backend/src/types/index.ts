@@ -11,10 +11,12 @@ export interface NFT {
     price: string;
     rentalPrice?: string;
     currency: string;
-    status: 'available' | 'rented' | 'listed';
+    status: 'available' | 'rented' | 'listing' | 'listed'; // Added listing to match frontend/controller usage
     likes: number;
     views?: number;
     metadata?: Record<string, any>;
+    timeLeft?: string;
+    rentalEndDate?: Date;
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -50,7 +52,8 @@ export interface Listing {
 export interface User {
     id: string;
     username: string;
-    email?: string;
+    email: string; // Made required to match schema
+    password?: string; // Added for auth
     walletAddress?: string;
     profileImage?: string;
     bio?: string;

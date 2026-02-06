@@ -26,7 +26,7 @@ const Navigation = () => {
       : location.pathname.startsWith(path);
 
   return (
-    <nav className="sticky top-0 z-50 w-full bg-background/60 backdrop-blur-xl border-b border-white/5">
+    <nav className="sticky top-0 z-50 w-full bg-zinc-900/80 backdrop-blur-xl border-b border-white/10">
       <div className="container-wide">
         <div className="flex items-center justify-between h-20">
 
@@ -37,7 +37,7 @@ const Navigation = () => {
                 <div className="w-4 h-4 rounded-sm bg-gradient-to-br from-primary to-blue-500" />
               </div>
             </div>
-            <span className="text-xl font-bold font-heading bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent group-hover:to-primary transition-all duration-300">
+            <span className="text-xl font-bold font-heading text-white group-hover:text-cyan-400 transition-colors duration-300">
               RentableNFT
             </span>
           </Link>
@@ -49,13 +49,13 @@ const Navigation = () => {
                 key={item.name}
                 to={item.href}
                 className={cn(
-                  "flex items-center space-x-2 px-5 py-2.5 rounded-full text-sm font-medium transition-all duration-300",
+                  "flex items-center space-x-2 px-5 py-2.5 rounded-full text-sm font-medium transition-all duration-300 border border-transparent",
                   isActive(item.href)
-                    ? "bg-primary/20 text-primary shadow-lg shadow-primary/10 border border-primary/20"
-                    : "text-muted-foreground hover:text-white hover:bg-white/5"
+                    ? "text-white bg-white/10 border-white/10 shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+                    : "text-white/85 hover:text-[#B98CFF] hover:bg-white/5"
                 )}
               >
-                <item.icon className={cn("w-4 h-4", isActive(item.href) && "animate-pulse")} />
+                <item.icon className={cn("w-4 h-4", isActive(item.href) ? "text-[#B98CFF]" : "text-white/70 group-hover:text-[#B98CFF]")} />
                 <span>{item.name}</span>
               </Link>
             ))}
@@ -66,10 +66,10 @@ const Navigation = () => {
 
             {/* Search Bar - Expanded */}
             <div className="relative group w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4 group-hover:text-primary transition-colors" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 group-hover:text-white transition-colors" />
               <Input
                 placeholder="Search collections..."
-                className="pl-10 bg-white/5 border-white/10 focus:bg-black/40 focus:w-72 transition-all duration-300"
+                className="pl-10 bg-white/5 border-white/10 text-white placeholder:text-gray-500 focus:bg-white/10 focus:border-white/20 focus:w-72 transition-all duration-300"
               />
             </div>
 

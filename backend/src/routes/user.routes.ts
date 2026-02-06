@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as userController from '../controllers/user.controller.js';
+import { protect } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -41,8 +42,8 @@ router.get('/:id/profile', userController.getUserProfile);
 /**
  * @route   PUT /api/users/:id/profile
  * @desc    Update user profile
- * @access  Public (will be protected later)
+ * @access  Private
  */
-router.put('/:id/profile', userController.updateUserProfile);
+router.put('/:id/profile', protect, userController.updateUserProfile);
 
 export default router;

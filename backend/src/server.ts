@@ -4,11 +4,16 @@ import dotenv from 'dotenv';
 import nftRoutes from './routes/nft.routes.js';
 import marketplaceRoutes from './routes/marketplace.routes.js';
 import rentalRoutes from './routes/rental.routes.js';
+import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 // Load environment variables
 dotenv.config();
+
+// Connect to Database
+import connectDB from './config/db.js';
+connectDB();
 
 const app: Application = express();
 const PORT = process.env.PORT || 5000;
@@ -28,6 +33,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // API Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/nfts', nftRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/rentals', rentalRoutes);

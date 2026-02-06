@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext";
 
 import MainLayout from "./components/layout/MainLayout";
 import Index from "./pages/Index";
@@ -9,6 +10,7 @@ import MyNFTs from "./pages/MyNFTs";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
+import { Toaster } from "./components/ui/sonner";
 
 /**
  * Query client (keep default settings for now; you can tune cache/timeouts later)
@@ -37,8 +39,8 @@ const PageAttributeSetter: React.FC<{ children: React.ReactNode }> = ({ children
 const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <PageAttributeSetter>
+      <AuthProvider>
+        <BrowserRouter>
           <PageAttributeSetter>
             <MainLayout>
               <Routes>
@@ -51,9 +53,10 @@ const App: React.FC = () => {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </MainLayout>
+            <Toaster />
           </PageAttributeSetter>
-        </PageAttributeSetter>
-      </BrowserRouter>
+        </BrowserRouter>
+      </AuthProvider>
     </QueryClientProvider>
   );
 };

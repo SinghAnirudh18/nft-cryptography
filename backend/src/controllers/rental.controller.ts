@@ -1,61 +1,36 @@
 import { Request, Response } from 'express';
-import { Rental, ApiResponse } from '../types/index.js';
-
-// Mock data storage
-let rentals: Rental[] = [
-    {
-        id: '1',
-        nftId: '2',
-        renterId: 'user3',
-        ownerId: 'user2',
-        rentalPrice: '0.08',
-        currency: 'ETH',
-        startDate: new Date('2026-01-10'),
-        endDate: new Date('2026-01-17'),
-        status: 'active',
-        transactionHash: '0x123abc...',
-        createdAt: new Date('2026-01-10')
-    },
-    {
-        id: '2',
-        nftId: '1',
-        renterId: 'user4',
-        ownerId: 'user1',
-        rentalPrice: '0.1',
-        currency: 'ETH',
-        startDate: new Date('2026-01-05'),
-        endDate: new Date('2026-01-12'),
-        status: 'completed',
-        transactionHash: '0x456def...',
-        createdAt: new Date('2026-01-05')
-    }
-];
+import { ApiResponse } from '../types/index.js';
+import { RentalModel } from '../models/Rental.js';
+import { NFTModel } from '../models/NFT.js';
 
 /**
  * Get all rentals
  */
-export const getAllRentals = (req: Request, res: Response) => {
+export const getAllRentals = async (req: Request, res: Response) => {
     try {
         const { status, userId } = req.query;
 
-        let filteredRentals = [...rentals];
+        const filter: any = {};
 
         // Filter by status
         if (status) {
-            filteredRentals = filteredRentals.filter(r => r.status === status);
+            filter.status = status;
         }
 
         // Filter by user (renter or owner)
         if (userId) {
-            filteredRentals = filteredRentals.filter(
-                r => r.renterId === userId || r.ownerId === userId
-            );
+            filter.$or = [
+                { renterId: userId },
+                { ownerId: userId }
+            ];
         }
+
+        const rentals = await RentalModel.find(filter);
 
         res.status(200).json({
             status: 'success',
-            data: filteredRentals,
-            message: `Found ${filteredRentals.length} rentals`
+            data: rentals,
+            message: `Found ${rentals.length} rentals`
         });
     } catch (error: any) {
         res.status(500).json({
@@ -68,10 +43,10 @@ export const getAllRentals = (req: Request, res: Response) => {
 /**
  * Get rental by ID
  */
-export const getRentalById = (req: Request, res: Response) => {
+export const getRentalById = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const rental = rentals.find(r => r.id === id);
+        const rental = await RentalModel.findOne({ id: id });
 
         if (!rental) {
             return res.status(404).json({
@@ -95,7 +70,7 @@ export const getRentalById = (req: Request, res: Response) => {
 /**
  * Create a new rental listing
  */
-export const createRental = (req: Request, res: Response) => {
+export const createRental = async (req: Request, res: Response) => {
     try {
         const { nftId, ownerId, rentalPrice, duration } = req.body;
 
@@ -107,7 +82,16 @@ export const createRental = (req: Request, res: Response) => {
             });
         }
 
-        const newRental: Rental = {
+        // Verify NFT exists and is owned by ownerId
+        const nft = await NFTModel.findOne({ id: nftId });
+        if (!nft) {
+            return res.status(404).json({ status: 'error', error: 'NFT not found' });
+        }
+        if (nft.owner !== ownerId) {
+            return res.status(403).json({ status: 'error', error: 'You do not own this NFT' });
+        }
+
+        const newRental = await RentalModel.create({
             id: Date.now().toString(),
             nftId,
             renterId: '', // Will be set when someone rents it
@@ -118,9 +102,15 @@ export const createRental = (req: Request, res: Response) => {
             endDate: new Date(Date.now() + duration * 24 * 60 * 60 * 1000), // duration in days
             status: 'active',
             createdAt: new Date()
-        };
+        });
 
-        rentals.push(newRental);
+        // Update NFT status? Or keep it 'available' until actually rented?
+        // Assuming creating a "Rental Listing" implies it's available for rent.
+        // If we want to prevent it from being sold while listed for rent, we should change status.
+        // For now, let's leave NFT status as is or 'listing' (if we had that enum).
+        // Since enum is 'available', 'rented', 'listing' (sale).
+        // Let's assume it stays 'available' effectively, or maybe add 'renting_listed'.
+        // Sticking to minimal changes for now.
 
         res.status(201).json({
             status: 'success',
@@ -138,12 +128,12 @@ export const createRental = (req: Request, res: Response) => {
 /**
  * Rent an NFT
  */
-export const rentNFT = (req: Request, res: Response) => {
+export const rentNFT = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const { renterId, duration } = req.body;
 
-        const rental = rentals.find(r => r.id === id);
+        const rental = await RentalModel.findOne({ id: id });
 
         if (!rental) {
             return res.status(404).json({
@@ -152,7 +142,7 @@ export const rentNFT = (req: Request, res: Response) => {
             });
         }
 
-        if (rental.status !== 'active' || rental.renterId) {
+        if (rental.status !== 'active' || (rental.renterId && rental.renterId !== '')) {
             return res.status(400).json({
                 status: 'error',
                 error: 'NFT is not available for rent'
@@ -164,6 +154,13 @@ export const rentNFT = (req: Request, res: Response) => {
         rental.startDate = new Date();
         rental.endDate = new Date(Date.now() + (duration || 7) * 24 * 60 * 60 * 1000);
         rental.transactionHash = `0x${Math.random().toString(16).substr(2, 40)}`;
+        // rental.status remains 'active' until completed? Or 'rented'? 
+        // Types say 'active' | 'completed' | 'cancelled'. So 'active' matches.
+
+        await rental.save();
+
+        // Update NFT status to 'rented'
+        await NFTModel.findOneAndUpdate({ id: rental.nftId }, { status: 'rented' });
 
         res.status(200).json({
             status: 'success',
@@ -181,10 +178,10 @@ export const rentNFT = (req: Request, res: Response) => {
 /**
  * Return a rented NFT
  */
-export const returnNFT = (req: Request, res: Response) => {
+export const returnNFT = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const rental = rentals.find(r => r.id === id);
+        const rental = await RentalModel.findOne({ id: id });
 
         if (!rental) {
             return res.status(404).json({
@@ -203,6 +200,10 @@ export const returnNFT = (req: Request, res: Response) => {
         // Update rental status
         rental.status = 'completed';
         rental.endDate = new Date();
+        await rental.save();
+
+        // Update NFT status back to 'available'
+        await NFTModel.findOneAndUpdate({ id: rental.nftId }, { status: 'available' });
 
         res.status(200).json({
             status: 'success',
@@ -220,18 +221,21 @@ export const returnNFT = (req: Request, res: Response) => {
 /**
  * Get active rentals
  */
-export const getActiveRentals = (req: Request, res: Response) => {
+export const getActiveRentals = async (req: Request, res: Response) => {
     try {
         const { userId } = req.query;
 
-        let activeRentals = rentals.filter(r => r.status === 'active');
+        const filter: any = { status: 'active' };
 
         // Filter by user if provided
         if (userId) {
-            activeRentals = activeRentals.filter(
-                r => r.renterId === userId || r.ownerId === userId
-            );
+            filter.$or = [
+                { renterId: userId },
+                { ownerId: userId }
+            ];
         }
+
+        const activeRentals = await RentalModel.find(filter);
 
         res.status(200).json({
             status: 'success',
@@ -249,25 +253,23 @@ export const getActiveRentals = (req: Request, res: Response) => {
 /**
  * Get rental history
  */
-export const getRentalHistory = (req: Request, res: Response) => {
+export const getRentalHistory = async (req: Request, res: Response) => {
     try {
         const { userId } = req.query;
 
-        let history = rentals.filter(r => r.status === 'completed' || r.status === 'cancelled');
+        const filter: any = {
+            status: { $in: ['completed', 'cancelled'] }
+        };
 
         // Filter by user if provided
         if (userId) {
-            history = history.filter(
-                r => r.renterId === userId || r.ownerId === userId
-            );
+            filter.$or = [
+                { renterId: userId },
+                { ownerId: userId }
+            ];
         }
 
-        // Sort by most recent first
-        history.sort((a, b) => {
-            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-            return dateB - dateA;
-        });
+        const history = await RentalModel.find(filter).sort({ createdAt: -1 });
 
         res.status(200).json({
             status: 'success',

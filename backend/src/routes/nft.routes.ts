@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as nftController from '../controllers/nft.controller.js';
+import { protect } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -20,23 +21,23 @@ router.get('/:id', nftController.getNFTById);
 /**
  * @route   POST /api/nfts
  * @desc    Create a new NFT
- * @access  Public (will be protected later)
+ * @access  Private
  */
-router.post('/', nftController.createNFT);
+router.post('/', protect, nftController.createNFT);
 
 /**
  * @route   PUT /api/nfts/:id
  * @desc    Update NFT
- * @access  Public (will be protected later)
+ * @access  Private
  */
-router.put('/:id', nftController.updateNFT);
+router.put('/:id', protect, nftController.updateNFT);
 
 /**
  * @route   DELETE /api/nfts/:id
  * @desc    Delete NFT
- * @access  Public (will be protected later)
+ * @access  Private
  */
-router.delete('/:id', nftController.deleteNFT);
+router.delete('/:id', protect, nftController.deleteNFT);
 
 /**
  * @route   GET /api/nfts/user/:userId
