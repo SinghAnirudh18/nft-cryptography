@@ -9,21 +9,23 @@ import {
 import NFTCard from '@/components/ui/nft-card';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
-import { NFT } from '../types';
+import { NFT, Listing, RentalHistoryItem, EarningHistoryItem, UserStats } from '../types';
 import { toast } from 'sonner';
 import RentListingModal from '@/components/rentals/RentListingModal';
 import { Badge } from '@/components/ui/badge';
+import { WalletConnectButton } from '@/components/WalletConnectButton';
 
 const MyNFTs = () => {
   const { user, isAuthenticated, logout, loading: authLoading } = useAuth();
+  console.log("MyNFTs Render: isAuthenticated=", isAuthenticated, "authLoading=", authLoading);
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState('owned');
   const [ownedNFTs, setOwnedNFTs] = useState<NFT[]>([]);
   const [rentedNFTs, setRentedNFTs] = useState<NFT[]>([]);
-  const [activeListings, setActiveListings] = useState<any[]>([]);
-  const [rentalHistory, setRentalHistory] = useState<any[]>([]);
-  const [earningsHistory, setEarningsHistory] = useState<any[]>([]);
+  const [activeListings, setActiveListings] = useState<Listing[]>([]);
+  const [rentalHistory, setRentalHistory] = useState<RentalHistoryItem[]>([]);
+  const [earningsHistory, setEarningsHistory] = useState<EarningHistoryItem[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -41,19 +43,41 @@ const MyNFTs = () => {
   });
 
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      navigate('/login');
-      return;
-    }
-
     if (user?.id) {
       fetchUserData();
     }
-  }, [user, authLoading, isAuthenticated]);
+  }, [user]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#0a0b14] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#0a0b14] flex flex-col items-center justify-center p-4">
+        <div className="text-center space-y-6 max-w-md">
+          <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
+            <Wallet className="w-10 h-10 text-primary" />
+          </div>
+          <h1 className="text-3xl font-bold text-white">Connect & Sign In</h1>
+          <p className="text-gray-400">
+            To view your dashboard, assets, and history, you need to verify your wallet ownership securely.
+          </p>
+          <div className="flex justify-center scale-125">
+            <WalletConnectButton />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const fetchUserData = async () => {
     // Start loading but don't clear previous data immediately if refreshed
-    if (activeTab === 'owned' && ownedNFTs.length === 0) setIsLoading(true);
+    // if (activeTab === 'owned' && ownedNFTs.length === 0) setIsLoading(true);
 
     try {
       const [ownedRes, rentedRes, listingsRes, statsRes, historyRes, earningsRes] = await Promise.all([
@@ -71,7 +95,7 @@ const MyNFTs = () => {
       setRentalHistory(historyRes.data.data || []);
       setEarningsHistory(earningsRes.data.data || []);
 
-      const userStats = statsRes.data.data;
+      const userStats: UserStats = statsRes.data.data;
       setStats({
         totalNFTs: userStats.totalNFTs || 0,
         totalValue: `${userStats.totalValue || 0} ETH`,

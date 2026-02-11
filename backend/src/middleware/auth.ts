@@ -24,7 +24,10 @@ export const protect = (req: AuthRequest, res: Response, next: NextFunction) => 
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret_key_change_in_prod');
+        if (!process.env.JWT_SECRET) {
+            throw new Error('JWT_SECRET not defined');
+        }
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = decoded;
         next();
     } catch (error) {

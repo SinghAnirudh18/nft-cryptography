@@ -173,15 +173,15 @@ const Index = () => {
         <section className="py-10 mb-20 px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 max-w-6xl mx-auto text-center bg-[#6495ED] rounded-[2.5rem] p-12 shadow-xl">
             <div>
-              <p className="text-4xl font-bold text-black mb-1">$12M+</p>
+              <p className="text-4xl font-bold text-black mb-1">$0</p>
               <p className="text-sm font-medium text-black/60 uppercase tracking-wider">Volume Traded</p>
             </div>
             <div>
-              <p className="text-4xl font-bold text-black mb-1">45K+</p>
+              <p className="text-4xl font-bold text-black mb-1">0+</p>
               <p className="text-sm font-medium text-black/60 uppercase tracking-wider">NFTs Listed</p>
             </div>
             <div>
-              <p className="text-4xl font-bold text-black mb-1">10K+</p>
+              <p className="text-4xl font-bold text-black mb-1">0+</p>
               <p className="text-sm font-medium text-black/60 uppercase tracking-wider">Active Users</p>
             </div>
             <div>

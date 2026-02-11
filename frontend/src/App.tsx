@@ -1,19 +1,22 @@
 import React, { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { WagmiProvider } from 'wagmi';
+import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
+import '@rainbow-me/rainbowkit/styles.css';
+
+import { config } from "./config/wagmi";
 import { AuthProvider } from "./context/AuthContext";
 
 import MainLayout from "./components/layout/MainLayout";
 import Index from "./pages/Index";
 import Marketplace from "./pages/Marketplace";
 import MyNFTs from "./pages/MyNFTs";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
 import { Toaster } from "./components/ui/sonner";
 
 /**
- * Query client (keep default settings for now; you can tune cache/timeouts later)
+ * Query client
  */
 const queryClient = new QueryClient();
 
@@ -38,26 +41,28 @@ const PageAttributeSetter: React.FC<{ children: React.ReactNode }> = ({ children
 
 const App: React.FC = () => {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <BrowserRouter>
-          <PageAttributeSetter>
-            <MainLayout>
-              <Routes>
-                <Route path="/" element={<Index />} />
-                <Route path="/marketplace" element={<Marketplace />} />
-                <Route path="/my-nfts" element={<MyNFTs />} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </MainLayout>
-            <Toaster />
-          </PageAttributeSetter>
-        </BrowserRouter>
-      </AuthProvider>
-    </QueryClientProvider>
+    <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>
+        <RainbowKitProvider theme={darkTheme()}>
+          <AuthProvider>
+            <BrowserRouter>
+              <PageAttributeSetter>
+                <MainLayout>
+                  <Routes>
+                    <Route path="/" element={<Index />} />
+                    <Route path="/marketplace" element={<Marketplace />} />
+                    <Route path="/my-nfts" element={<MyNFTs />} />
+                    {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </MainLayout>
+                <Toaster />
+              </PageAttributeSetter>
+            </BrowserRouter>
+          </AuthProvider>
+        </RainbowKitProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
   );
 };
 

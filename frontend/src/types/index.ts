@@ -34,3 +34,41 @@ export interface ApiResponse<T> {
     message?: string;
     error?: string;
 }
+
+export interface Listing {
+    id: string;
+    nft: NFT;
+    price: number;
+    rentalPrice: number;
+    duration: number;
+    seller: string; // sellerId or seller object
+    createdAt: Date;
+    status: 'active' | 'sold' | 'cancelled';
+}
+
+export interface RentalHistoryItem {
+    id: string;
+    nftId: string;
+    nftName: string;
+    nftImage: string;
+    startDate: string;
+    endDate?: string;
+    price: number;
+    status: string; // 'returned', 'active', etc.
+}
+
+export interface EarningHistoryItem {
+    id: string;
+    date: string;
+    amount: number;
+    source: string;
+}
+
+export interface UserStats {
+    totalNFTs: number;
+    totalValue: number;
+    activeListings: number;
+    totalRentals: number;
+    totalEarnings: number;
+    activeRentedOut: number;
+}

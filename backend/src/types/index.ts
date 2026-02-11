@@ -61,6 +61,7 @@ export interface User {
     email: string; // Made required to match schema
     password?: string; // Added for auth
     walletAddress?: string;
+    nonce?: string; // Added for SIWE
     profileImage?: string;
     bio?: string;
     createdAt?: Date;

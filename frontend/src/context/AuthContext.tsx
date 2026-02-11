@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useSignMessage } from 'wagmi';
 
 
 interface User {
@@ -27,31 +28,44 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [loading, setLoading] = useState<boolean>(true);
 
     useEffect(() => {
-        const loadUser = async () => {
-            if (token) {
-                try {
-                    // Ideally, verify token with backend or store user in local storage
-                    // For now, we'll try to get user profile if token exists
-                    // Or rely on stored user data if we decide to store it
+        const verifySession = async () => {
+            if (!token) {
+                setLoading(false);
+                return;
+            }
 
-                    // Simple check: if token exists, we are "logged in" but might need user details
-                    // Let's decode or fetch profile. For now, assuming persistence via localStorage for user too
-                    const storedUser = localStorage.getItem('user');
-                    if (storedUser) {
-                        setUser(JSON.parse(storedUser));
+            try {
+                const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+                const response = await fetch(`${apiBaseUrl}/auth/verify-token`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
                     }
-                } catch (error) {
-                    console.error('Failed to load user', error);
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.valid && data.user) {
+                        setUser(data.user);
+                        // Optional: Refresh token in storage if needed, but for now just sync state
+                    } else {
+                        logout();
+                    }
+                } else {
                     logout();
                 }
+            } catch (error) {
+                console.error('Session verification failed:', error);
+                logout();
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         };
 
-        loadUser();
-    }, [token]);
+        verifySession();
+    }, []); // Run only on mount (or when token changes? logic suggests on mount check is sufficient if we trust internal state updates)
 
     const login = (newToken: string, userData: User) => {
+        console.log("AuthContext: login called, setting token:", newToken.substring(0, 10) + "...");
         localStorage.setItem('token', newToken);
         localStorage.setItem('user', JSON.stringify(userData));
         setToken(newToken);
@@ -65,37 +79,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
     };
 
+    // Wagmi hook for signing messages
+    const { signMessageAsync } = useSignMessage();
+
     const loginWithWallet = async (address: string) => {
         try {
-            // We can't use 'api' from '../api/client' here if it causes circular deps or context issues?
-            // But actually, we need to call the backend.
-            // Let's assume we can fetch directly or use a simple fetch for now to avoid complexity imports if needed.
-            // Or use the `api` client if imported.
-            // Importing api client here *might* be fine.
-            // For safety, I'll use fetch or axios directly if possible, OR import api.
-            // Let's try importing api at the top.
-
-            // Dynamic import or assumed global?
-            // I'll just use fetch to be safe from circular dependency with axios interceptors using auth context?
-            // Actually, axios interceptor usually uses localStorage, not AuthContext directly (unless planned).
-            // Let's assume fetch for now.
-
+            setLoading(true);
             const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-            const response = await fetch(`${apiBaseUrl}/auth/wallet`, {
+
+            // 1. Get Nonce
+            const nonceResponse = await fetch(`${apiBaseUrl}/auth/nonce/${address}`);
+            const nonceData = await nonceResponse.json();
+
+            if (!nonceResponse.ok || !nonceData.nonce) {
+                throw new Error(nonceData.error || 'Failed to get nonce');
+            }
+
+            // 2. Sign Message
+            const message = `Sign in to DAO Marketplace using account ${address}. Nonce: ${nonceData.nonce}`;
+            const signature = await signMessageAsync({ message });
+
+            // 3. Verify Signature
+            const verifyResponse = await fetch(`${apiBaseUrl}/auth/verify`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ walletAddress: address })
+                body: JSON.stringify({ walletAddress: address, signature, message })
             });
 
-            const data = await response.json();
-            if (data.status === 'success') {
-                login(data.data.token, data.data);
+            const verifyData = await verifyResponse.json();
+
+            if (verifyResponse.ok && verifyData.token) {
+                login(verifyData.token, verifyData.user);
+                setLoading(false);
                 return true;
+            } else {
+                throw new Error(verifyData.error || 'Verification failed');
             }
-            return false;
-        } catch (error) {
+        } catch (error: any) {
             console.error("Wallet login failed", error);
-            return false;
+            setLoading(false);
+            throw error; // Re-throw so component can show specific error
         }
     };
 
