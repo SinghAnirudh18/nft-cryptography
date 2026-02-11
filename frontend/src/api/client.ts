@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: 'http://localhost:5000/api', // Update if backend runs on different port
+    baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api', // Use env var with fallback
     headers: {
         'Content-Type': 'application/json'
     }

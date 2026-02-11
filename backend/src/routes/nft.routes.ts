@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as nftController from '../controllers/nft.controller.js';
 import { protect } from '../middleware/auth.js';
 
-const router = Router();
+const router: Router = Router();
 
 /**
  * @route   GET /api/nfts
@@ -23,7 +23,9 @@ router.get('/:id', nftController.getNFTById);
  * @desc    Create a new NFT
  * @access  Private
  */
-router.post('/', protect, nftController.createNFT);
+import { upload } from '../middleware/upload.js';
+
+router.post('/', protect, upload.single('image'), nftController.createNFT);
 
 /**
  * @route   PUT /api/nfts/:id

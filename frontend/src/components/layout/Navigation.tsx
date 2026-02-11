@@ -10,6 +10,7 @@ import {
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { cn } from "@/lib/utils";
+import { WalletConnectButton } from "../WalletConnectButton";
 
 const Navigation = () => {
   const location = useLocation();
@@ -74,11 +75,7 @@ const Navigation = () => {
             </div>
 
             <div className="h-8 w-px bg-white/10 mx-2" />
-
-            <Button variant="premium" className="shadow-lg shadow-primary/20">
-              <Wallet className="w-4 h-4 mr-2" />
-              Connect Wallet
-            </Button>
+            <WalletConnectButton />
           </div>
 
         </div>

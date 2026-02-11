@@ -13,6 +13,7 @@ interface AuthContextType {
     user: User | null;
     token: string | null;
     login: (token: string, userData: User) => void;
+    loginWithWallet: (address: string) => Promise<boolean>;
     logout: () => void;
     isAuthenticated: boolean;
     loading: boolean;
@@ -64,11 +65,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
     };
 
+    const loginWithWallet = async (address: string) => {
+        try {
+            // We can't use 'api' from '../api/client' here if it causes circular deps or context issues?
+            // But actually, we need to call the backend.
+            // Let's assume we can fetch directly or use a simple fetch for now to avoid complexity imports if needed.
+            // Or use the `api` client if imported.
+            // Importing api client here *might* be fine.
+            // For safety, I'll use fetch or axios directly if possible, OR import api.
+            // Let's try importing api at the top.
+
+            // Dynamic import or assumed global?
+            // I'll just use fetch to be safe from circular dependency with axios interceptors using auth context?
+            // Actually, axios interceptor usually uses localStorage, not AuthContext directly (unless planned).
+            // Let's assume fetch for now.
+
+            const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+            const response = await fetch(`${apiBaseUrl}/auth/wallet`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ walletAddress: address })
+            });
+
+            const data = await response.json();
+            if (data.status === 'success') {
+                login(data.data.token, data.data);
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error("Wallet login failed", error);
+            return false;
+        }
+    };
+
     return (
         <AuthContext.Provider value={{
             user,
             token,
             login,
+            loginWithWallet,
             logout,
             isAuthenticated: !!token,
             loading

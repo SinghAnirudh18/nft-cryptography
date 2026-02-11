@@ -81,11 +81,23 @@ export const getNFTById = async (req: Request, res: Response) => {
 /**
  * Create new NFT
  */
+import { uploadToIPFS } from '../services/ipfs.service.js';
+
+/**
+ * Create new NFT
+ */
 export const createNFT = async (req: Request, res: Response) => {
     try {
+        let imageUrl = req.body.image;
+
+        if (req.file) {
+            imageUrl = await uploadToIPFS(req.file);
+        }
+
         const newNFT = await NFTModel.create({
             id: Date.now().toString(),
             ...req.body,
+            image: imageUrl,
             createdAt: new Date(),
             updatedAt: new Date()
         });

@@ -1,3 +1,8 @@
+import { Request, Response } from 'express';
+import { RentalModel } from '../models/Rental.js';
+import { NFTModel } from '../models/NFT.js';
+import { ListingModel } from '../models/Listing.js';
+
 /**
  * Return a rented NFT by NFT ID
  */

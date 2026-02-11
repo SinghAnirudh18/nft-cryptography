@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as userController from '../controllers/user.controller.js';
 import { protect } from '../middleware/auth.js';
 
-const router = Router();
+const router: Router = Router();
 
 /**
  * @route   GET /api/users/:id/stats
@@ -45,5 +45,19 @@ router.get('/:id/profile', userController.getUserProfile);
  * @access  Private
  */
 router.put('/:id/profile', protect, userController.updateUserProfile);
+
+/**
+ * @route   GET /api/users/:id/history
+ * @desc    Get user's past rental history (as renter)
+ * @access  Public
+ */
+router.get('/:id/history', userController.getRentalHistory);
+
+/**
+ * @route   GET /api/users/:id/earnings
+ * @desc    Get user's earnings history (as owner)
+ * @access  Public
+ */
+router.get('/:id/earnings', userController.getEarningsHistory);
 
 export default router;

@@ -17,7 +17,8 @@ interface RentListingModalProps {
 
 const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalProps) => {
     const [price, setPrice] = useState("");
-    const [duration, setDuration] = useState("30"); // Default 30 days
+    const [duration, setDuration] = useState(import.meta.env.VITE_DEFAULT_RENTAL_DURATION || "30"); // Default from env
+    const currency = import.meta.env.VITE_CURRENCY_SYMBOL || "ETH";
     const [isLoading, setIsLoading] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -53,7 +54,7 @@ const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalP
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4 py-4">
                     <div className="space-y-2">
-                        <Label htmlFor="price" className="text-white">Daily Price (ETH)</Label>
+                        <Label htmlFor="price" className="text-white">Daily Price ({currency})</Label>
                         <Input
                             id="price"
                             type="number"
