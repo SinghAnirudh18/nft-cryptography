@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import type { HardhatUserConfig } from "hardhat/config";
+import "@nomicfoundation/hardhat-ethers";
 
 dotenv.config({ path: "./backend/.env" });
 

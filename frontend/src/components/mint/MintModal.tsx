@@ -5,10 +5,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Loader2, Upload, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
+import { Loader2, Upload, CheckCircle, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/api/client';
-import { parseEther } from 'viem';
+import { useAuth } from '@/context/AuthContext';
 
 // ABI for mint function
 const MINT_ABI = [
@@ -32,6 +32,10 @@ interface MintModalProps {
 
 export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps) {
     const { address } = useAccount();
+    const { user } = useAuth();
+
+    // Use wagmi address or fall back to the SIWE-authenticated wallet from auth context
+    const walletAddress = address || (user?.walletAddress as `0x${string}` | undefined);
 
     // Form State
     const [name, setName] = useState('');
@@ -61,7 +65,12 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
     };
 
     const handleMint = async () => {
-        if (!file || !name || !address) return;
+        if (!file || !name) return;
+
+        if (!walletAddress) {
+            toast.error("Wallet not connected. Please reconnect your wallet and try again.");
+            return;
+        }
 
         try {
             setStep('uploading');
@@ -94,7 +103,7 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
                 address: targetContract as `0x${string}`,
                 abi: MINT_ABI,
                 functionName: 'mint',
-                args: [address, tokenURI],
+                args: [walletAddress, tokenURI],
             });
 
             setTxHash(hash);
@@ -229,7 +238,7 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
                         <Button variant="outline" onClick={onClose} disabled={step !== 'idle'}>
                             Cancel
                         </Button>
-                        <Button onClick={handleMint} disabled={!file || !name || step !== 'idle' || !address}>
+                        <Button onClick={handleMint} disabled={!file || !name || step !== 'idle'}>
                             {step === 'uploading' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {step === 'minting' && 'Confirm in Wallet...'}
                             {step === 'confirming' && (

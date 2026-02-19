@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
-import { LogIn, Loader2, User, ChevronDown } from "lucide-react";
+import { LogIn, Loader2, ChevronDown } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useAccount } from "wagmi";
 import { useNavigate } from "react-router-dom";
 import {
     DropdownMenu,
@@ -19,6 +20,18 @@ export const WalletConnectButton = () => {
     const [isSigningIn, setIsSigningIn] = useState(false);
     const [shouldNavigate, setShouldNavigate] = useState(false);
     const navigate = useNavigate();
+    const { address: connectedAddress } = useAccount();
+
+    // Auto-logout when MetaMask switches to a different account
+    useEffect(() => {
+        if (!isAuthenticated || !connectedAddress || !user?.walletAddress) return;
+        const connectedLower = connectedAddress.toLowerCase();
+        const sessionLower = user.walletAddress.toLowerCase();
+        if (connectedLower !== sessionLower) {
+            logout();
+            toast.info("Wallet switched — please sign in with your new account.");
+        }
+    }, [connectedAddress, isAuthenticated, user?.walletAddress, logout]);
 
     useEffect(() => {
         if (isAuthenticated && shouldNavigate) {
@@ -27,22 +40,27 @@ export const WalletConnectButton = () => {
         }
     }, [isAuthenticated, shouldNavigate, navigate]);
 
-    const handleSignIn = async (address: string) => {
+    const handleSignIn = async () => {
+        if (!connectedAddress) {
+            toast.error("Please connect your wallet first");
+            return;
+        }
         try {
             setIsSigningIn(true);
-            const success = await loginWithWallet(address);
+            // Use the latest connected address from hook, not the potentially stale one
+            const success = await loginWithWallet(connectedAddress);
             if (success) {
                 toast.success("Successfully signed in!");
-                // Force navigation immediately on success
                 navigate("/my-nfts");
             }
         } catch (error: any) {
             console.error("Sign in failed:", error);
+            // Show the actual error message from backend
             toast.error(error.message || "Sign in failed. Please try again.");
         } finally {
             setIsSigningIn(false);
         }
-    }
+    };
 
     return (
         <ConnectButton.Custom>
@@ -96,7 +114,7 @@ export const WalletConnectButton = () => {
                                 {account.displayName}
                             </Button>
                             <Button
-                                onClick={() => handleSignIn(account.address)}
+                                onClick={handleSignIn}
                                 disabled={isSigningIn}
                                 className="bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 border-yellow-500/20 border"
                             >

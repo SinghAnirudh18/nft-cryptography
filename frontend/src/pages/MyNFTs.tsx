@@ -168,6 +168,33 @@ const MyNFTs = () => {
       if (nft) handleListForRent(nft);
     } else if (action === 'return') {
       handleReturn(id);
+    } else if (action === 'remove-listing') {
+      handleRemoveListing(id);
+    } else if (action === 'delete') {
+      handleDeleteNFT(id);
+    }
+  };
+
+  const handleRemoveListing = async (listingId: string) => {
+    try {
+      await api.delete(`/marketplace/listings/${listingId}/cancel`);
+      toast.success('Listing removed. Your NFT is now available.');
+      setActiveListings(prev => prev.filter((l: any) => l.id !== listingId));
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.response?.data?.error || 'Failed to remove listing');
+    }
+  };
+
+  const handleDeleteNFT = async (nftId: string) => {
+    if (!window.confirm('Permanently delete this NFT from your collection? This cannot be undone.')) return;
+    try {
+      await api.delete(`/nfts/${nftId}`);
+      toast.success('NFT deleted from your collection.');
+      setOwnedNFTs(prev => prev.filter(n => n.id !== nftId));
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.response?.data?.error || 'Failed to delete NFT');
     }
   };
 
@@ -179,7 +206,7 @@ const MyNFTs = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0b14] text-white selection:bg-primary/30 pb-20">
+    <div className="min-h-screen bg-[#0a0b14] text-white selection:bg-primary/30 pb-20 overflow-hidden">
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-8 relative">
 
         {/* Subtle Background Glows */}
@@ -424,7 +451,13 @@ const MyNFTs = () => {
                       {activeListings.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
                           {activeListings.map((listing: any) => (
-                            <NFTCard key={listing.id} nft={{ ...listing.nft, price: listing.price, rentalPrice: listing.rentalPrice }} status="listing" onAction={handleAction} />
+                            <NFTCard
+                              key={listing.id}
+                              nft={{ ...listing.nft, id: listing.id, price: listing.price, rentalPrice: listing.rentalPrice }}
+                              status="listing"
+                              isOwner={true}
+                              onAction={handleAction}
+                            />
                           ))}
                         </div>
                       ) : (

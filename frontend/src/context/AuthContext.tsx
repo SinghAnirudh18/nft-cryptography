@@ -87,8 +87,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setLoading(true);
             const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
-            // 1. Get Nonce from backend
-            const nonceResponse = await fetch(`${apiBaseUrl}/auth/nonce/${address}`);
+            // 1. Get Nonce from backend (with cache control)
+            const nonceResponse = await fetch(`${apiBaseUrl}/auth/nonce/${address}?t=${Date.now()}`, {
+                cache: 'no-store'
+            });
             const nonceData = await nonceResponse.json();
 
             if (!nonceResponse.ok || !nonceData.nonce) {

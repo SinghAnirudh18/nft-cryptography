@@ -1,17 +1,18 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Heart, Timer, Sparkles } from "lucide-react";
+import { Heart, Timer, Sparkles, Trash2 } from "lucide-react";
 import { NFT } from "../../types";
 
 interface NFTCardProps {
     nft: NFT;
     status?: 'listing' | 'owned' | 'rented';
+    /** Pass true when the card is shown in the seller's own Listings tab */
+    isOwner?: boolean;
     onAction?: (action: string, id: string) => void;
 }
 
-const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
-    // Determine if this is an owned NFT that is currently rented out
+const NFTCard = ({ nft, status = 'listing', isOwner = false, onAction }: NFTCardProps) => {
     const isRentedOut = status === 'owned' && (nft.status === 'rented' || nft.isEscrowed);
 
     return (
@@ -25,11 +26,9 @@ const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
                     className="object-cover w-full h-full transition-transform duration-700 group-hover:scale-110"
                     loading="lazy"
                 />
-
-                {/* Overlay Gradient (Darker for contrast) */}
                 <div className="absolute inset-0 bg-gradient-to-t from-[#161a2b] via-transparent to-transparent opacity-90" />
 
-                {/* Top Actions */}
+                {/* Heart */}
                 <div className="absolute top-3 right-3 flex gap-2 translate-y-[-10px] opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
                     <button className="p-2 rounded-full bg-black/60 backdrop-blur-md hover:bg-white/20 transition-colors text-white border border-white/10">
                         <Heart className="w-4 h-4" />
@@ -39,23 +38,20 @@ const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
                 {/* Status Badge */}
                 <div className="absolute top-3 left-3">
                     {status === 'rented' && (
-                        <Badge className="backdrop-blur-md bg-purple-500/20 text-purple-300 border-purple-500/30">
-                            Rented
-                        </Badge>
+                        <Badge className="backdrop-blur-md bg-purple-500/20 text-purple-300 border-purple-500/30">Rented</Badge>
                     )}
                     {status === 'owned' && !isRentedOut && (
-                        <Badge className="backdrop-blur-md bg-emerald-500/20 text-emerald-300 border-emerald-500/30">
-                            Owned
-                        </Badge>
+                        <Badge className="backdrop-blur-md bg-emerald-500/20 text-emerald-300 border-emerald-500/30">Owned</Badge>
                     )}
                     {isRentedOut && (
-                        <Badge variant="outline" className="backdrop-blur-md bg-amber-500/20 text-amber-300 border-amber-500/30">
-                            Rented Out
-                        </Badge>
+                        <Badge variant="outline" className="backdrop-blur-md bg-amber-500/20 text-amber-300 border-amber-500/30">Rented Out</Badge>
+                    )}
+                    {status === 'listing' && (
+                        <Badge className="backdrop-blur-md bg-blue-500/20 text-blue-300 border-blue-500/30">Listed</Badge>
                     )}
                 </div>
 
-                {/* Bottom Info Overlay (Time/Status) */}
+                {/* Time overlay */}
                 {(nft.timeLeft || status === 'listing' || isRentedOut) && (
                     <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between">
                         {(nft.timeLeft || nft.rentalEndDate) && (
@@ -93,16 +89,16 @@ const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
 
                 <div className="h-px bg-white/5" />
 
-                {/* Pricing / Action Area */}
+                {/* Pricing / Action Row */}
                 <div className="flex items-end justify-between gap-3">
-
                     <div className="flex flex-col gap-0.5">
                         <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
                             {status === 'listing' ? 'Price' : status === 'rented' ? 'Expires' : 'Est. Value'}
                         </span>
-
                         {status === 'rented' ? (
-                            <span className="text-sm font-bold text-white">{nft.timeLeft || (nft.rentalEndDate ? new Date(nft.rentalEndDate).toLocaleDateString() : 'Unknown')}</span>
+                            <span className="text-sm font-bold text-white">
+                                {nft.timeLeft || (nft.rentalEndDate ? new Date(nft.rentalEndDate).toLocaleDateString() : 'Unknown')}
+                            </span>
                         ) : (
                             <div className="flex items-baseline gap-1">
                                 <span className="text-lg font-bold text-white">{nft.price}</span>
@@ -112,16 +108,38 @@ const NFTCard = ({ nft, status = 'listing', onAction }: NFTCardProps) => {
                     </div>
 
                     {/* Action Button */}
-                    <div className="flex-1 max-w-[120px]">
-                        {status === 'listing' && (
+                    <div className="flex-1 max-w-[140px] flex flex-col gap-2">
+                        {/* Market browser: Rent button */}
+                        {status === 'listing' && !isOwner && (
                             <Button size="sm" className="w-full bg-white text-black hover:bg-gray-200 font-bold shadow-lg shadow-white/5 h-9 rounded-xl" onClick={() => onAction?.('rent', nft.id)}>
                                 Rent
                             </Button>
                         )}
-                        {status === 'owned' && !isRentedOut && (
-                            <Button variant="outline" size="sm" className="w-full border-white/20 hover:bg-white/10 text-white h-9 rounded-xl font-medium" onClick={() => onAction?.('list', nft.id)}>
-                                <Sparkles className="w-3.5 h-3.5 mr-1.5" /> List
+                        {/* Owner's Listings tab: Remove listing button */}
+                        {status === 'listing' && isOwner && (
+                            <Button
+                                size="sm"
+                                variant="destructive"
+                                className="w-full h-9 rounded-xl font-medium bg-red-500/10 text-red-300 border border-red-500/30 hover:bg-red-500/30 shadow-lg shadow-red-500/10"
+                                onClick={() => onAction?.('remove-listing', nft.id)}
+                            >
+                                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                                Remove
                             </Button>
+                        )}
+                        {status === 'owned' && !isRentedOut && (
+                            <>
+                                <Button variant="outline" size="sm" className="w-full border-white/20 hover:bg-white/10 text-white h-9 rounded-xl font-medium" onClick={() => onAction?.('list', nft.id)}>
+                                    <Sparkles className="w-3.5 h-3.5 mr-1.5" /> List
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    className="w-full h-8 rounded-xl font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/25 transition-colors"
+                                    onClick={() => onAction?.('delete', nft.id)}
+                                >
+                                    <Trash2 className="w-3 h-3 mr-1" /> Delete
+                                </Button>
+                            </>
                         )}
                         {isRentedOut && (
                             <Button variant="secondary" size="sm" className="w-full opacity-50 cursor-not-allowed h-9 rounded-xl bg-white/5 text-gray-400" disabled>

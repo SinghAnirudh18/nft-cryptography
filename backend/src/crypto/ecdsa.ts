@@ -33,8 +33,9 @@ import {
     isOnCurve, isPointAtInfinity,
 } from './secp256k1.js';
 
-// Half of curve order — used for low-s check
-const HALF_N = CURVE.n >> 1n;
+// Note: low-s enforcement is NOT done here. Low-s (EIP-2) is a requirement
+// for signers (transactions), not for verifiers. MetaMask personal_sign can
+// produce high-s signatures which are equally valid for verification.
 
 // ============================================================================
 // SIGNATURE PARSING
@@ -64,10 +65,6 @@ function parseSignature(signature: string | Buffer): { r: bigint; s: bigint; v: 
     if (r <= 0n || r >= CURVE.n) throw new Error('Invalid signature: r out of range');
     if (s <= 0n || s >= CURVE.n) throw new Error('Invalid signature: s out of range');
 
-    // Low-s enforcement (EIP-2) — reject malleable signatures
-    if (s > HALF_N) {
-        throw new Error('Invalid signature: s > n/2 (malleability)');
-    }
 
     // Normalize v: 27/28 → 0/1
     if (v >= 27) v -= 27;

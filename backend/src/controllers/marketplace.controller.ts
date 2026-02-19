@@ -222,7 +222,55 @@ export const createListing = async (req: Request, res: Response) => {
 };
 
 /**
- * Delete a listing
+ * Cancel (delist) a listing
+ * - Verifies caller is the seller
+ * - Sets listing status to 'cancelled' (soft delete)
+ * - Resets NFT status back to 'available'
+ */
+export const cancelListing = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const userId = (req as any).user.id;
+
+        // 1. Find the listing
+        const listing = await ListingModel.findOne({ id });
+        if (!listing) {
+            return res.status(404).json({ status: 'error', error: 'Listing not found' });
+        }
+
+        // 2. Verify ownership — only the seller can remove their listing
+        if (listing.sellerId !== userId) {
+            return res.status(403).json({ status: 'error', error: 'Not authorised. You did not create this listing.' });
+        }
+
+        // 3. Only active listings can be cancelled
+        if (listing.status !== 'active') {
+            return res.status(400).json({ status: 'error', error: `Cannot cancel a listing with status '${listing.status}'.` });
+        }
+
+        // 4. Soft-delete: mark as cancelled
+        listing.status = 'cancelled';
+        await listing.save();
+
+        // 5. Reset the NFT back to 'available'
+        await NFTModel.findOneAndUpdate(
+            { id: listing.nftId },
+            { status: 'available', isEscrowed: false }
+        );
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Listing removed successfully. NFT is now available.'
+        });
+
+    } catch (error: any) {
+        console.error('Cancel listing error:', error);
+        res.status(500).json({ status: 'error', error: error.message });
+    }
+};
+
+/**
+ * Delete a listing (legacy hard-delete – kept for admin use)
  */
 export const deleteListing = async (req: Request, res: Response) => {
     try {

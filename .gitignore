@@ -50,3 +50,9 @@ coverage/
 # Cache
 .eslintcache
 .npm
+
+# Hardhat
+artifacts/
+cache/
+typechain-types/
+hardhat.config.ts.js

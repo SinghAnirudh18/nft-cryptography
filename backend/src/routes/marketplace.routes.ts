@@ -53,9 +53,16 @@ router.post('/listings', marketplaceController.createListing);
 
 /**
  * @route   DELETE /api/marketplace/listings/:id
- * @desc    Delete a marketplace listing
- * @access  Public (will be protected later)
+ * @desc    Delete a marketplace listing (legacy / admin)
+ * @access  Public
  */
 router.delete('/listings/:id', marketplaceController.deleteListing);
+
+/**
+ * @route   DELETE /api/marketplace/listings/:id/cancel
+ * @desc    Cancel (delist) a listing – resets NFT status to available
+ * @access  Private (seller only)
+ */
+router.delete('/listings/:id/cancel', protect, marketplaceController.cancelListing);
 
 export default router;

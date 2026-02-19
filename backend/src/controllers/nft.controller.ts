@@ -82,8 +82,9 @@ export const getNFTById = async (req: Request, res: Response) => {
  * Create new NFT
  */
 import { uploadFileBuffer, uploadJSON } from '../services/ipfs.service.js';
-import { sha256Buffer } from '../crypto/sha256.js';
+import { sha256 } from '../crypto/sha256.js';
 import { NFTModel } from '../models/NFT.js';
+import { ListingModel } from '../models/Listing.js';
 
 /**
  * Prepare NFT for minting
@@ -100,10 +101,10 @@ export const prepareMint = async (req: Request, res: Response) => {
         }
 
         const { name, description, attributes } = req.body;
-        const walletAddress = (req as any).user.walletAddress; // From SIWE auth
+        const walletAddress = (req as any).user.id; // JWT payload has 'id', which is wallet address for SIWE
 
         // 1. Calculate Authenticity Hash (SHA-256 of raw bytes)
-        const fileHash = sha256Buffer(req.file.buffer);
+        const fileHash = sha256(req.file.buffer);
 
         // 2. Upload Image to IPFS
         const imageUrl = await uploadFileBuffer(req.file.buffer, req.file.originalname, req.file.mimetype);
@@ -231,32 +232,50 @@ export const updateNFT = async (req: Request, res: Response) => {
 };
 
 /**
- * Delete NFT
+ * Delete NFT from collection
+ * - Verifies caller is the owner
+ * - Blocks deletion if NFT is currently rented / in escrow
+ * - Cancels any active listings first
  */
 export const deleteNFT = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const deletedNFT = await NFTModel.findOneAndDelete({ id: id });
+        const userId = (req as any).user.id;
 
-        if (!deletedNFT) {
-            return res.status(404).json({
-                status: 'error',
-                error: 'NFT not found'
-            });
+        const nft = await NFTModel.findOne({ id });
+        if (!nft) {
+            return res.status(404).json({ status: 'error', error: 'NFT not found' });
         }
+
+        // Ownership check
+        if (nft.owner !== userId) {
+            return res.status(403).json({ status: 'error', error: 'Not authorised. You do not own this NFT.' });
+        }
+
+        // Block deletion while actively rented / in escrow
+        if (nft.status === 'rented' || nft.isEscrowed) {
+            return res.status(400).json({ status: 'error', error: 'Cannot delete an NFT that is currently rented or in escrow.' });
+        }
+
+        // Cancel any active listings for this NFT
+        await ListingModel.updateMany(
+            { nftId: id, status: 'active' },
+            { status: 'cancelled' }
+        );
+
+        // Hard-delete the NFT document
+        await NFTModel.findOneAndDelete({ id });
 
         const response: ApiResponse<any> = {
             status: 'success',
-            data: deletedNFT,
-            message: 'NFT deleted successfully'
+            data: null,
+            message: 'NFT deleted from collection'
         };
 
         res.status(200).json(response);
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        console.error('Delete NFT error:', error);
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 

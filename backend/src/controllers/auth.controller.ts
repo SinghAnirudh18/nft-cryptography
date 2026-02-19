@@ -227,7 +227,9 @@ export const verifyToken = async (req: Request, res: Response) => {
             return res.status(401).json({ status: 'error', error: 'Not authenticated' });
         }
 
-        const user = await UserModel.findById(userReq.user.id);
+        // JWT payload 'id' is the wallet address (set during SIWE verify)
+        const walletAddr = userReq.user.id?.toLowerCase();
+        const user = await UserModel.findOne({ walletAddress: walletAddr });
         if (!user) {
             return res.status(404).json({ status: 'error', error: 'User not found' });
         }
