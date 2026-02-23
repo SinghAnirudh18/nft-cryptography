@@ -1,24 +1,21 @@
-import express, { Application, Request, Response } from 'express';
-import cors from 'cors';
 import dotenv from 'dotenv';
-
-// Load environment variables first
+// Load environment variables immediately before any other imports
 dotenv.config();
 
-import connectDB from './config/db.js';
+import express, { Application, Request, Response } from 'express';
+import cors from 'cors';
+
+import connectDBWithRetry from './config/db.js';
 import { CryptoService } from './security/cryptoService.js';
-import { chainListener } from './services/chainListener.js';
-import { projector } from './services/projector.js';
+import { startWorkers } from './workers/index.js';
 import nftRoutes from './routes/nft.routes.js';
 import marketplaceRoutes from './routes/marketplace.routes.js';
 import rentalRoutes from './routes/rental.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import demoRoutes from './routes/demo.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 import { errorHandler } from './middleware/errorHandler.js';
-
-// Connect to Database
-connectDB();
 
 const app: Application = express();
 const PORT = process.env.PORT || 5000;
@@ -30,10 +27,14 @@ app.use(express.urlencoded({ extended: true }));
 
 // Health check route
 app.get('/health', (_req: Request, res: Response) => {
+    const dbConnected = (app as any).get('dbConnected') || false;
     res.status(200).json({
         status: 'success',
         message: 'NFT Rental Marketplace API is running',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        dbConnected,
+        cryptoOk: (globalThis as any).CRYPTO_SELFTEST_OK,
+        abisLoaded: (globalThis as any).ABIS_LOADED
     });
 });
 
@@ -44,6 +45,7 @@ app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/rentals', rentalRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/demo', demoRoutes);
+app.use('/admin', adminRoutes);
 
 // 404 handler
 app.use('*', (req: Request, res: Response) => {
@@ -58,24 +60,25 @@ app.use(errorHandler);
 
 // Start server
 const startServer = async () => {
+    console.log('🚀 Starting NFT Rental Marketplace API...');
+
     try {
-        // Start Chain Listener and Projector workers
-        chainListener.start();
-        projector.start();
+        // 1. Connect to Database (with retry)
+        await connectDBWithRetry();
+        (app as any).set('dbConnected', true);
 
-        // Run Crypto Self-Test — crashes server if any primitive is broken
-        try {
-            await CryptoService.selfTest();
-        } catch (error) {
-            console.error('❌ Crypto Self-Test FAILED — aborting server start', error);
-            process.exit(1);
-        }
+        // 2. Run Crypto Self-Test (non-fatal unless STRICT_CRYPTO_SELFTEST is true)
+        await CryptoService.selfTest();
 
+        // 3. Start Background Workers (Chain Listener & Projector)
+        await startWorkers();
+
+        // 4. Listen
         app.listen(PORT, () => {
             console.log(`✅ Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
         });
-    } catch (error) {
-        console.error('Failed to start server:', error);
+    } catch (error: any) {
+        console.error('❌ FATAL: Failed to start server:', error.message);
         process.exit(1);
     }
 };

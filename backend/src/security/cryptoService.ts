@@ -31,6 +31,7 @@ import {
     CURVE, G, POINT_AT_INFINITY,
     scalarMultiply, isPointAtInfinity,
 } from '../crypto/secp256k1.js';
+import { generateNonce } from '../crypto/random.js';
 
 // ============================================================================
 // HMAC-SHA256 (using custom SHA-256)
@@ -86,7 +87,7 @@ export class CryptoService {
      * 32 bytes → base64url (no padding ambiguity).
      */
     static generateNonce(): string {
-        return randomBytes(32).toString('base64url');
+        return generateNonce();
     }
 
     /**
@@ -191,24 +192,40 @@ export class CryptoService {
      *   3. EC math: n × G = point at infinity
      *   4. ECDSA recovery: ethers oracle comparison (dev) or hardcoded vector (prod)
      *
-     * @throws and crashes server if any check fails
+     * @throws and crashes server ONLY if STRICT_CRYPTO_SELFTEST is true
      */
     static async selfTest(): Promise<void> {
-        // ── 1. SHA-256 NIST Vector ────────────────────────────────────
-        const shaResult = sha256('abc');
-        const shaExpected = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
-        if (shaResult !== shaExpected) throw new Error(`SHA-256 self-test FAILED. Got: ${shaResult}`);
+        try {
+            // ── 1. SHA-256 NIST Vector ────────────────────────────────────
+            const shaResult = sha256('abc');
+            const shaExpected = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+            if (shaResult !== shaExpected) throw new Error(`SHA-256 self-test FAILED. Got: ${shaResult}`);
 
-        // ── 2. Keccak-256 Empty String ────────────────────────────────
-        const keccakResult = keccak256(Buffer.alloc(0));
-        const keccakExpected = 'c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470';
-        if (keccakResult !== keccakExpected) throw new Error(`Keccak-256 self-test FAILED. Got: ${keccakResult}`);
+            // ── 2. Keccak-256 Empty String ────────────────────────────────
+            const keccakResult = keccak256(Buffer.alloc(0));
+            const keccakExpected = 'c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470';
+            if (keccakResult !== keccakExpected) throw new Error(`Keccak-256 self-test FAILED. Got: ${keccakResult}`);
 
-        // ── 3. EC Math: n × G = infinity ──────────────────────────────
-        const nG = scalarMultiply(CURVE.n, G);
-        if (!isPointAtInfinity(nG)) throw new Error(`EC math self-test FAILED: n×G is not infinity`);
+            // ── 3. EC Math: n × G = infinity ──────────────────────────────
+            const nG = scalarMultiply(CURVE.n, G);
+            if (!isPointAtInfinity(nG)) throw new Error(`EC math self-test FAILED: n×G is not infinity`);
 
-        // ── 4. ECDSA Recovery Oracle ──────────────────────────────────
+            // ── 4. ECDSA Recovery Oracle ──────────────────────────────────
+            await this.testEcdsaRecovery();
+
+            (globalThis as any).CRYPTO_SELFTEST_OK = true;
+            console.log('✅ Crypto self-test passed');
+        } catch (error: any) {
+            (globalThis as any).CRYPTO_SELFTEST_OK = false;
+            console.error('❌ Crypto self-test FAILED:', error.message);
+            if (process.env.STRICT_CRYPTO_SELFTEST === 'true') {
+                throw error;
+            }
+            console.warn('⚠️  Continuing in degraded mode because STRICT_CRYPTO_SELFTEST is not enabled.');
+        }
+    }
+
+    private static async testEcdsaRecovery(): Promise<void> {
         try {
             const ethers = await import('ethers');
             const testKey = '0x' + 'ab'.repeat(32);

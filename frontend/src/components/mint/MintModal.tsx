@@ -45,15 +45,17 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
     const [preview, setPreview] = useState<string | null>(null);
 
     // Status State
-    const [step, setStep] = useState<'idle' | 'uploading' | 'minting' | 'confirming' | 'success'>('idle');
+    const [step, setStep] = useState<'idle' | 'uploading' | 'minting' | 'confirming' | 'syncing' | 'success'>('idle');
     const [draftId, setDraftId] = useState<string | null>(null);
     const [txHash, setTxHash] = useState<`0x${string}` | undefined>(undefined);
+    // Store metadataHash between prepare and confirm steps
+    const [mintMetadataHash, setMintMetadataHash] = useState<string | undefined>(undefined);
 
     // Wagmi Hooks
     const { writeContractAsync } = useWriteContract();
 
     // Wait for Tx
-    const { isSuccess: isTxSuccess } = useWaitForTransactionReceipt({
+    const { isSuccess: isTxSuccess, data: receipt } = useWaitForTransactionReceipt({
         hash: txHash,
     });
 
@@ -87,8 +89,10 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
 
-            const { tokenURI, draftId: newDraftId, contractAddress, fileHash } = prepRes.data.data;
+            const { tokenURI, draftId: newDraftId, contractAddress, metadataHash } = prepRes.data.data;
             setDraftId(newDraftId);
+            // Store metadataHash so the confirm step can send it to the backend
+            setMintMetadataHash(metadataHash);
 
             // 2. Wallet Sign & Send
             setStep('minting');
@@ -104,7 +108,9 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
                 address: targetContract as `0x${string}`,
                 abi: MINT_ABI,
                 functionName: 'mint',
-                args: [walletAddress, tokenURI, `0x${fileHash}`],
+                // metadataHash (not fileHash!) — the canonical SHA-256 of the metadata JSON
+                // fileHash is the image hash and is intentionally different
+                args: [walletAddress, tokenURI, metadataHash as `0x${string}`],
             });
 
             setTxHash(hash);
@@ -124,19 +130,47 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
     // or we can just poll. 
     // Actually, `useWaitForTransactionReceipt` is great.
 
-    // EFFECT: Confirm on Backend
-    if (step === 'confirming' && isTxSuccess && txHash && draftId) {
-        // Only run once
-        api.post('/nfts/confirm', { draftId, txHash }, { headers: { 'Idempotency-Key': crypto.randomUUID() } })
+    // Effect: Confirm on Backend
+    if (step === 'confirming' && isTxSuccess && txHash && draftId && receipt) {
+        // Show syncing banner immediately — user doesn't need to wait for backend
+        setStep('syncing');
+
+        let tokenId: string | undefined;
+        try {
+            const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+            const log = receipt.logs.find(l =>
+                l.topics[0] === transferTopic &&
+                l.topics[1] === "0x0000000000000000000000000000000000000000000000000000000000000000" &&
+                l.topics[3]
+            );
+            if (log && log.topics[3]) {
+                tokenId = BigInt(log.topics[3]).toString();
+            }
+        } catch (err) {
+            console.error("Failed to parse tokenId from receipt logs:", err);
+        }
+
+        const payload = {
+            draftId,
+            txHash,
+            tokenId,
+            blockNumber: Number(receipt.blockNumber),
+            metadataHash: mintMetadataHash   // send the hash we computed server-side
+        };
+
+        api.post('/nfts/confirm', payload, { headers: { 'Idempotency-Key': crypto.randomUUID() } })
             .then(() => {
                 setStep('success');
-                toast.success("Minted successfully!");
+                toast.success('NFT minted and confirmed! It may take a moment to appear in your collection.');
                 onSuccess();
             })
             .catch(err => {
-                console.error("Backend confirm failed:", err);
-                toast.error("Minted on-chain but failed to confirm on backend.");
-                setStep('success'); // Still success on chain
+                console.error('Backend confirm failed:', err);
+                // Don't show error — the on-chain tx succeeded.
+                // The projector will reconcile it via the event log.
+                setStep('success');
+                toast.success('On-chain success! Backend is syncing — your NFT will appear shortly.');
+                onSuccess();
             });
     }
 
@@ -147,6 +181,7 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
         setPreview(null);
         setStep('idle');
         setTxHash(undefined);
+        setMintMetadataHash(undefined);
         onClose();
     };
 
@@ -160,26 +195,38 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
                     </DialogDescription>
                 </DialogHeader>
 
-                {step === 'success' ? (
+                {(step === 'success' || step === 'syncing') ? (
                     <div className="flex flex-col items-center justify-center py-8 space-y-4">
                         <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center">
                             <CheckCircle className="w-8 h-8 text-green-500" />
                         </div>
-                        <h3 className="text-xl font-bold">Minted!</h3>
+                        <h3 className="text-xl font-bold">
+                            {step === 'syncing' ? 'On-Chain Success!' : 'Minted!'}
+                        </h3>
                         <p className="text-sm text-gray-400 text-center">
-                            Your NFT has been minted and is now verifying on the blockchain.
+                            {step === 'syncing'
+                                ? 'Transaction confirmed on Sepolia. Backend is indexing your NFT — it will appear in your collection within ~30 seconds.'
+                                : 'Your NFT has been minted and confirmed.'
+                            }
                         </p>
                         {txHash && (
                             <a
                                 href={`https://sepolia.etherscan.io/tx/${txHash}`}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="text-primary hover:underline flex items-center gap-1 text-sm"
+                                className="text-primary hover:underline flex items-center gap-1 text-sm font-medium"
                             >
                                 View on Etherscan <ExternalLink className="w-3 h-3" />
                             </a>
                         )}
-                        <Button onClick={reset} className="w-full mt-4">Close</Button>
+                        {step === 'syncing' && (
+                            <p className="text-xs text-amber-400/80 text-center border border-amber-400/20 rounded-lg px-3 py-2 bg-amber-400/5">
+                                ⏳ Waiting for blockchain confirmation (usually ~30s on Sepolia)
+                            </p>
+                        )}
+                        {step === 'success' && (
+                            <Button onClick={reset} className="w-full mt-4">Close</Button>
+                        )}
                     </div>
                 ) : (
                     <div className="grid gap-4 py-4">
@@ -234,11 +281,9 @@ export default function MintModal({ isOpen, onClose, onSuccess }: MintModalProps
                     </div>
                 )}
 
-                {step !== 'success' && (
+                {step !== 'success' && step !== 'syncing' && (
                     <DialogFooter>
-                        <Button variant="outline" onClick={onClose} disabled={step !== 'idle'}>
-                            Cancel
-                        </Button>
+                        <Button variant="outline" onClick={onClose} disabled={step !== 'idle'}>Cancel</Button>
                         <Button onClick={handleMint} disabled={!file || !name || step !== 'idle'}>
                             {step === 'uploading' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {step === 'minting' && 'Confirm in Wallet...'}

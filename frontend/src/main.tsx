@@ -3,7 +3,10 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import "./App.css";
-// import { web3Modal } from "./lib/web3Modal"; // Initialize Web3Modal - DISABLING TO FIX WHITE SCREEN
+import { validateFrontendEnv } from "./utils/validateEnv";
+
+// Validate Environment before rendering
+validateFrontendEnv();
 
 const root = document.getElementById("root") as HTMLElement | null;
 

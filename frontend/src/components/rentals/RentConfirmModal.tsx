@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { NFT } from "../../types";
 import api from "../../api/client";
 import { toast } from "sonner";
-import { Loader2, AlertTriangle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useAccount, useSendTransaction, useWaitForTransactionReceipt } from "wagmi";
 
 interface RentConfirmModalProps {
@@ -37,7 +37,7 @@ const RentConfirmModal = ({ isOpen, onClose, nft, onSuccess }: RentConfirmModalP
         }
     }, [isConfirmed, onSuccess, onClose]);
 
-    const pricePerDay = Number(nft?.rentalPrice) || 0;
+    const pricePerDay = Number(nft?.rentalPrice || (nft as any).pricePerDay) || 0;
     const totalCost = parseFloat(duration) * pricePerDay;
 
     const handleRent = async () => {
@@ -89,11 +89,10 @@ const RentConfirmModal = ({ isOpen, onClose, nft, onSuccess }: RentConfirmModalP
                 </DialogHeader>
 
                 <div className="py-4 space-y-4">
-                    <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-yellow-500 shrink-0 mt-0.5" />
-                        <div className="text-sm text-yellow-200/80">
-                            <p className="font-medium text-yellow-200 mb-1">Escrow Notice</p>
-                            This NFT will be locked in escrow. You will receive usage rights for the duration.
+                    <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-start gap-3">
+                        <div className="text-sm text-blue-200/80">
+                            <p className="font-medium text-blue-200 mb-1">Non-Custodial Rental</p>
+                            The NFT remains in the owner's wallet. You will receive usage (rental) rights on-chain for the duration.
                         </div>
                     </div>
 

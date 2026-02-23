@@ -1,303 +1,153 @@
 import { Request, Response } from 'express';
 import { ApiResponse } from '../types/index.js';
-// import { NFTModel } from '../models/NFT.js'; // Removed duplicate
+import { NFTModel } from '../models/NFT.js';
+import { ListingModel } from '../models/Listing.js';
+import { DraftModel } from '../models/Draft.js';
+import { uploadFileBuffer } from '../services/ipfs.service.js';
+import { sha256 } from '../crypto/sha256.js';
+import { hashMetadata } from '../utils/canonicalMetadata.js';
 
 /**
  * Get all NFTs
  */
 export const getAllNFTs = async (req: Request, res: Response) => {
     try {
-        const { status, collection, minPrice, maxPrice } = req.query;
-
+        const { collection } = req.query;
         const filter: any = {};
+        if (collection) filter.collectionName = { $regex: collection, $options: 'i' };
 
-        // Filter by status
-        if (status) {
-            filter.status = status;
-        }
+        const nfts = await NFTModel.find(filter).lean();
 
-        // Filter by collection
-        if (collection) {
-            filter.collectionName = { $regex: collection, $options: 'i' };
-        }
+        const now = new Date();
+        const enrichedNFTs = await Promise.all(nfts.map(async (nft) => {
+            const isListed = await ListingModel.exists({
+                tokenAddress: nft.tokenAddress?.toLowerCase(),
+                tokenId: nft.tokenId?.toString(),
+                status: 'ACTIVE'
+            });
+            const isRented = nft.expiresAt && nft.expiresAt > now;
+            return { ...nft, isListed: !!isListed, isRented: !!isRented };
+        }));
 
-        // Filter by price range
-        if (minPrice || maxPrice) {
-            filter.price = {};
-            if (minPrice) filter.price.$gte = minPrice; // Note: Stored as string, comparison might be tricky without casting.Ideally store as number.
-            if (maxPrice) filter.price.$lte = maxPrice;
-        }
-
-        const filteredNFTs = await NFTModel.find(filter);
-
-        const response: ApiResponse<any[]> = {
-            status: 'success',
-            data: filteredNFTs,
-            message: `Found ${filteredNFTs.length} NFTs`
-        };
-
-        res.status(200).json(response);
+        res.status(200).json({ status: 'success', data: enrichedNFTs });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
 /**
- * Get NFT by ID
+ * Get NFT by ID (supports compound 'tokenAddress-tokenId' or legacy id)
  */
 export const getNFTById = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const nft = await NFTModel.findOne({ id: id });
+        let query: any = { id };
 
-        if (!nft) {
-            return res.status(404).json({
-                status: 'error',
-                error: 'NFT not found'
-            });
+        // Handle compound ID: tokenAddress-tokenId
+        if (id.includes('-')) {
+            const [tokenAddress, tokenId] = id.split('-');
+            query = { tokenAddress: tokenAddress.toLowerCase(), tokenId };
         }
 
-        // Increment views
-        nft.views = (nft.views || 0) + 1;
-        await nft.save();
+        const nft: any = await NFTModel.findOne(query).lean();
+        if (!nft) return res.status(404).json({ status: 'error', error: 'NFT not found' });
 
-        const response: ApiResponse<any> = {
-            status: 'success',
-            data: nft
-        };
-
-        res.status(200).json(response);
-    } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
+        const isListed = await ListingModel.exists({
+            tokenAddress: nft.tokenAddress?.toLowerCase(),
+            tokenId: nft.tokenId?.toString(),
+            status: 'ACTIVE'
         });
+        const isRented = nft.expiresAt && nft.expiresAt > new Date();
+
+        res.status(200).json({ status: 'success', data: { ...nft, isListed: !!isListed, isRented: !!isRented } });
+    } catch (error: any) {
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
 /**
- * Create new NFT
- */
-import { uploadFileBuffer, uploadJSON } from '../services/ipfs.service.js';
-import { sha256 } from '../crypto/sha256.js';
-import { NFTModel } from '../models/NFT.js';
-import { ListingModel } from '../models/Listing.js';
-
-/**
- * Prepare NFT for minting
- * 1. Calculate SHA-256 of raw image (for authenticity)
- * 2. Upload image to IPFS
- * 3. Create & upload metadata to IPFS
- * 4. Create Draft NFT record
- * 5. Return tokenURI + draftId for frontend to mint
+ * Prepare NFT for minting (Draft Phase)
  */
 export const prepareMint = async (req: Request, res: Response) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'Image file is required' });
-        }
+        if (!req.file) return res.status(400).json({ error: 'Image file is required' });
 
         const { name, description, attributes } = req.body;
-        const walletAddress = (req as any).user.id; // JWT payload has 'id', which is wallet address for SIWE
+        const walletAddress = (req as any).user.id; // From JWT
 
-        // 1. Calculate Authenticity Hash (SHA-256 of raw bytes)
         const fileHash = sha256(req.file.buffer);
-
-        // 2. Upload Image to IPFS
         const imageUrl = await uploadFileBuffer(req.file.buffer, req.file.originalname, req.file.mimetype);
 
-        // Extract CID from URL (simple split for demo)
-        // https://gateway.pinata.cloud/ipfs/Qm...
-        const imageCID = imageUrl.split('/').pop() || '';
-
-        // 3. Create Metadata String
-        const metadata = {
+        const metadataObj = {
             name,
-            description,
+            description: description || '',
             image: imageUrl,
             attributes: attributes ? JSON.parse(attributes) : [],
             external_url: "https://daomarketplace.demo",
-            file_hash: fileHash, // On-chain proof of matching file
+            file_hash: fileHash,
             creator: walletAddress
         };
-        const metadataString = JSON.stringify(metadata);
 
-        // 3.1 Calculate Metadata Hash exactly as it will be stored and retrieved
-        const metadataHash = '0x' + sha256(metadataString);
+        const metadataHash = hashMetadata(metadataObj);
+        const { canonicalizeMetadata } = await import('../utils/canonicalMetadata.js');
+        const metadataString = JSON.stringify(canonicalizeMetadata(metadataObj));
 
-        // 3.2 Upload Metadata String as a Buffer to Pinata so it bypasses their JSON formatting
         const metadataUrl = await uploadFileBuffer(
             Buffer.from(metadataString, 'utf-8'),
             `${name.replace(/\s+/g, '-')}-metadata.json`,
             'application/json'
         );
-        const metadataCID = metadataUrl.split('/').pop() || '';
 
-        // 4. Create Draft Record
-        const draftNFT = await NFTModel.create({
-            id: Date.now().toString(), // Temporary ID until minted
+        // ALWAYS write to DraftModel, not NFTModel
+        const draft = await DraftModel.create({
+            metadataHash,
+            creator: walletAddress,
             name,
             description,
             image: imageUrl,
-            owner: (req as any).user.id, // User ID
-            creator: walletAddress,
-            collectionName: 'DAO Collection',
-            price: 0, // Not listed yet
-            status: 'AVAILABLE',
-
-            // Chain Data
+            attributes: metadataObj.attributes,
             fileHash,
-            imageCID,
-            metadataCID,
-            metadataHash, // Update the DB field
             tokenURI: metadataUrl,
-            mintStatus: 'DRAFT'
+            status: 'PREPARED',
+            expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000) // 48h
         });
 
-        // 5. Return Prep Data
         res.status(201).json({
             status: 'success',
             data: {
-                draftId: draftNFT.id,
+                draftId: draft._id,
                 tokenURI: metadataUrl,
                 contractAddress: process.env.CONTRACT_ADDRESS,
-                fileHash,
-                metadataHash // Need this for the frontend to mint correctly
+                metadataHash
             }
         });
-
     } catch (error: any) {
-        console.error("Prepare Mint Error:", error);
         res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
 /**
- * Confirm Mint
- * Frontend calls this after wallet successfully submits transaction
+ * Confirm Mint (Proactive Update)
  */
 export const confirmMint = async (req: Request, res: Response) => {
     try {
-        const idempotencyKey = req.headers['idempotency-key'];
-        if (!idempotencyKey) {
-            return res.status(400).json({ status: 'error', error: 'Idempotency-Key header is required' });
-        }
-
         const { draftId, txHash } = req.body;
+        const walletAddress = (req as any).user.id;
 
-        if (!draftId || !txHash) {
-            return res.status(400).json({ error: 'Missing draftId or txHash' });
-        }
+        const draft = await DraftModel.findById(draftId);
+        if (!draft) return res.status(404).json({ error: 'Draft not found' });
+        if (draft.creator !== walletAddress) return res.status(403).json({ error: 'Not authorized' });
 
-        const nft = await NFTModel.findOne({ id: draftId });
-        if (!nft) {
-            const existingNFTByTx = await NFTModel.findOne({ mintTxHash: txHash });
-            if (existingNFTByTx) {
-                return res.status(200).json({ status: 'success', message: 'Mint already marked as pending' });
-            }
-            return res.status(404).json({ error: 'Draft NFT not found' });
-        }
+        draft.status = 'MINTING';
+        await draft.save();
 
-        nft.mintTxHash = txHash;
-        nft.mintStatus = 'PENDING';
-        await nft.save();
-
-        res.status(200).json({ status: 'success', message: 'Mint marked as pending' });
-
+        res.status(200).json({ status: 'success', message: 'Mint marked as processing' });
     } catch (error: any) {
-        console.error("Confirm Mint Error:", error);
         res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
-// Legacy createNFT wrapper if needed, or just remove
 export const createNFT = prepareMint;
-
-/**
- * Update NFT
- */
-export const updateNFT = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-
-        const nft = await NFTModel.findOneAndUpdate(
-            { id: id },
-            { ...req.body, updatedAt: new Date() },
-            { new: true }
-        );
-
-        if (!nft) {
-            return res.status(404).json({
-                status: 'error',
-                error: 'NFT not found'
-            });
-        }
-
-        const response: ApiResponse<any> = {
-            status: 'success',
-            data: nft,
-            message: 'NFT updated successfully'
-        };
-
-        res.status(200).json(response);
-    } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
-    }
-};
-
-/**
- * Delete NFT from collection
- * - Verifies caller is the owner
- * - Blocks deletion if NFT is currently rented / in escrow
- * - Cancels any active listings first
- */
-export const deleteNFT = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-        const userId = (req as any).user.id;
-
-        const nft = await NFTModel.findOne({ id });
-        if (!nft) {
-            return res.status(404).json({ status: 'error', error: 'NFT not found' });
-        }
-
-        // Ownership check
-        if (nft.owner !== userId) {
-            return res.status(403).json({ status: 'error', error: 'Not authorised. You do not own this NFT.' });
-        }
-
-        // Block deletion while actively rented / in escrow
-        if (nft.status === 'RENTED' || nft.isEscrowed) {
-            return res.status(400).json({ status: 'error', error: 'Cannot delete an NFT that is currently rented or in escrow.' });
-        }
-
-        // Cancel any active listings for this NFT
-        await ListingModel.updateMany(
-            { nftId: id, status: 'ACTIVE' },
-            { status: 'CANCELLED' }
-        );
-
-        // Hard-delete the NFT document
-        await NFTModel.findOneAndDelete({ id });
-
-        const response: ApiResponse<any> = {
-            status: 'success',
-            data: null,
-            message: 'NFT deleted from collection'
-        };
-
-        res.status(200).json(response);
-    } catch (error: any) {
-        console.error('Delete NFT error:', error);
-        res.status(500).json({ status: 'error', error: error.message });
-    }
-};
 
 /**
  * Get NFTs by user
@@ -305,19 +155,63 @@ export const deleteNFT = async (req: Request, res: Response) => {
 export const getNFTsByUser = async (req: Request, res: Response) => {
     try {
         const { userId } = req.params;
-        const userNFTs = await NFTModel.find({ owner: userId });
+        const nfts = await NFTModel.find({ owner: userId.toLowerCase() }).lean();
 
-        const response: ApiResponse<any[]> = {
-            status: 'success',
-            data: userNFTs,
-            message: `Found ${userNFTs.length} NFTs for user ${userId}`
-        };
+        const enrichedNFTs = await Promise.all(nfts.map(async (nft) => {
+            const isListed = await ListingModel.exists({
+                tokenAddress: nft.tokenAddress?.toLowerCase(),
+                tokenId: nft.tokenId?.toString(),
+                status: 'ACTIVE'
+            });
+            const isRented = nft.expiresAt && nft.expiresAt > new Date();
+            return { ...nft, isListed: !!isListed, isRented: !!isRented };
+        }));
 
-        res.status(200).json(response);
+        res.status(200).json({ status: 'success', data: enrichedNFTs });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
+    }
+};
+
+/**
+ * Update NFT
+ */
+export const updateNFT = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+
+        let query: any = { id };
+        if (id.includes('-')) {
+            const [tokenAddress, tokenId] = id.split('-');
+            query = { tokenAddress: tokenAddress.toLowerCase(), tokenId };
+        }
+
+        const nft = await NFTModel.findOneAndUpdate(query, { $set: updates }, { new: true });
+        if (!nft) return res.status(404).json({ error: 'NFT not found' });
+        res.status(200).json({ status: 'success', data: nft });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+/**
+ * Delete NFT
+ */
+export const deleteNFT = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+
+        let query: any = { id };
+        if (id.includes('-')) {
+            const [tokenAddress, tokenId] = id.split('-');
+            query = { tokenAddress: tokenAddress.toLowerCase(), tokenId };
+        }
+
+        const result = await NFTModel.deleteOne(query);
+        if (result.deletedCount === 0) return res.status(404).json({ error: 'NFT not found' });
+        res.status(200).json({ status: 'success', message: 'NFT deleted' });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
     }
 };

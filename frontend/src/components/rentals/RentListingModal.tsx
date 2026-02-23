@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,8 +60,6 @@ const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalP
 
     // Status State
     const [step, setStep] = useState<'idle' | 'drafting' | 'approving' | 'confirmingApproval' | 'signing' | 'confirming' | 'backend' | 'success'>('idle');
-    const [draftId, setDraftId] = useState<string | null>(null);
-    const [metadataHash, setMetadataHash] = useState<string | null>(null);
     const [txHash, setTxHash] = useState<`0x${string}` | undefined>(undefined);
     const [pending, setPending] = useState(false);
 
@@ -70,16 +68,22 @@ const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalP
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        console.log("[RentListingModal] handleSubmit triggered!");
 
-        if (pending) return;
+        if (pending) {
+            console.log("[RentListingModal] Aborted: already pending");
+            return;
+        }
         setPending(true);
 
         try {
+            console.log("[RentListingModal] NFT prop:", nft);
             if (!nft || !nft.tokenId) {
                 toast.error("This NFT is missing contract data and cannot be listed on-chain.");
                 return;
             }
 
+            console.log("[RentListingModal] Connected address:", address);
             if (!address) {
                 toast.error("Wallet not connected.");
                 return;
@@ -88,13 +92,20 @@ const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalP
             const marketplaceAddress = import.meta.env.VITE_MARKETPLACE_ADDRESS;
             const contractAddress = nft.tokenAddress || nft.contractAddress || import.meta.env.VITE_CONTRACT_ADDRESS;
 
+            console.log("[RentListingModal] Contracts:", { marketplaceAddress, contractAddress });
+
             if (!marketplaceAddress) {
+                toast.error("Marketplace Address not configured in env");
                 throw new Error("Marketplace Address not configured in env");
             }
 
             // 1. Preflight Checks
+            console.log("[RentListingModal] Running preflight checks...");
             await ensureSepolia();
+            console.log("[RentListingModal] Sepolia network verified");
+
             await verifyOwnership(contractAddress as Extract<`0x${string}`, string>, BigInt(nft.tokenId), address as Extract<`0x${string}`, string>);
+            console.log("[RentListingModal] Ownership verified");
 
             setStep('drafting');
 
@@ -108,8 +119,6 @@ const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalP
             const newDraftId = draftRes.data.data.draftId;
             const newMetadataHash = draftRes.data.data.metadataHash;
 
-            setDraftId(newDraftId);
-            setMetadataHash(newMetadataHash);
 
             setStep('approving');
 
@@ -144,19 +153,25 @@ const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalP
             setStep('confirming');
             await waitForTransactionReceipt(config, { hash: listHash });
 
-            // 5. Backend Confirmation
+            // 5. Backend Confirmation — don't block UX on this
             setStep('backend');
-            await api.post('/marketplace/notify', {
-                draftId: newDraftId,
-                txHash: listHash
-            }, { headers: { 'Idempotency-Key': crypto.randomUUID() } });
-
-            setStep('success');
-            toast.success("Successfully listed for rent!");
+            try {
+                await api.post('/marketplace/notify', {
+                    draftId: newDraftId,
+                    txHash: listHash
+                }, { headers: { 'Idempotency-Key': crypto.randomUUID() } });
+                setStep('success');
+                toast.success("Successfully listed for rent!");
+            } catch (backendErr) {
+                // On-chain tx already confirmed — backend will reconcile via event log
+                console.warn("[RentListingModal] Backend notify failed (non-fatal):", backendErr);
+                setStep('success');
+                toast.success("On-chain success — backend sync pending. Your listing will appear shortly.");
+            }
             onSuccess();
 
         } catch (error: any) {
-            console.error("[ERROR] Transaction failed in handleSubmit:", error);
+            console.error("[RentListingModal] Transaction failed in handleSubmit:", error);
             setStep('idle');
             // If the user rejects the transaction, viability shouldn't show it as an ugly error string to the user necessarily but we log it.
             if (error.message?.includes("User rejected")) {
@@ -165,6 +180,7 @@ const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalP
                 toast.error(error.message || "Failed to initiate transaction");
             }
         } finally {
+            console.log("[RentListingModal] Clearing pending state");
             setPending(false);
         }
     };
@@ -175,8 +191,6 @@ const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalP
         setDuration(import.meta.env.VITE_DEFAULT_RENTAL_DURATION || "30");
         setStep('idle');
         setTxHash(undefined);
-        setDraftId(null);
-        setMetadataHash(null);
         onClose();
     };
 
@@ -243,12 +257,6 @@ const RentListingModal = ({ isOpen, onClose, nft, onSuccess }: RentListingModalP
                                 type="submit"
                                 disabled={step !== 'idle' || !price}
                                 className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white border-0"
-                                onClick={(e) => {
-                                    console.log(`[USER CLICK EVENT] Submit button actual onClick triggered.`);
-                                    if (!price || !duration) {
-                                        console.warn(`[WARNING] Price or duration is empty! Browser HTML5 validation might block this submit natively.`);
-                                    }
-                                }}
                             >
                                 {step === 'drafting' && <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Preparing Listing...</>}
                                 {step === 'approving' && <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Confirm Approval in Wallet...</>}

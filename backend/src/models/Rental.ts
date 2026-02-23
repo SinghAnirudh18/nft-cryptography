@@ -69,8 +69,8 @@ rentalSchema.index({ txHash: 1, logIndex: 1 }, { unique: true, sparse: true });
  * - user's rentals
  * - NFT rental history
  */
-rentalSchema.index({ renterWallet: 1 });
-rentalSchema.index({ ownerWallet: 1 });
+rentalSchema.index({ renter: 1 });   // fast lookup: rentals by renter wallet
+rentalSchema.index({ owner: 1 });    // fast lookup: rentals by owner wallet
 rentalSchema.index({ tokenAddress: 1, tokenId: 1 });
 
 export const RentalModel = mongoose.model<Rental>('Rental', rentalSchema);

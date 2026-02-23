@@ -1,32 +1,21 @@
 // backend/src/services/chainListener.ts
 import { ethers } from 'ethers';
-import { NFTModel } from '../models/NFT.js';
-import { ListingModel } from '../models/Listing.js';
-import { RentalModel } from '../models/Rental.js';
 import { EventModel } from '../models/Event.js';
 import { SyncStateModel } from '../models/SyncState.js';
 import fs from 'fs';
 import path from 'path';
-import { getJSON } from './ipfs.service.js';
-import { sha256 } from '../crypto/sha256.js';
-import { getDynamicProvider } from '../utils/provider.js';
 
 // Load ABIs
 const NFT_ABI_PATH = path.join(process.cwd(), '..', 'shared', 'DAOMarketplaceNFT.json');
 const MARKET_ABI_PATH = path.join(process.cwd(), '..', 'shared', 'DAOMarketplaceMarket.json');
 
-// Configuration
-const CONFIRMATIONS_N = parseInt(process.env.CONFIRMATIONS_N || '3', 10);
-const REORG_GUARD = 12; // Blocks to look back on restart to catch missed reorgs
-
 interface QueuedEvent {
-    type: 'Mint' | 'List' | 'Cancel' | 'Rent';
+    eventName: string;
     blockNumber: number;
     logIndex: number;
     txHash: string;
-    data: any;
-    processed: boolean;
-    attempts: number;
+    contractAddress: string;
+    args: any;
 }
 
 export class ChainListener {
@@ -38,51 +27,82 @@ export class ChainListener {
 
     constructor() { }
 
-    public async start() {
+    private safeLoadAbi(filePath: string) {
+        if (!fs.existsSync(filePath)) {
+            console.warn(`⚠️  ABI file missing: ${filePath}`);
+            return null;
+        }
+        try {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            return data.abi || data;
+        } catch (err) {
+            console.error(`❌ Failed to parse ABI ${filePath}:`, err);
+            return null;
+        }
+    }
+
+    public async start(provider: ethers.Provider) {
         if (this.isRunning) return;
         this.isRunning = true;
+        this.provider = provider;
 
-        this.provider = getDynamicProvider();
+        const CONFIRMATIONS_N = parseInt(process.env.CONFIRMATIONS_N || '3', 10);
+        const REORG_GUARD = parseInt(process.env.REORG_GUARD || '12', 10);
+        const BATCH_SIZE = parseInt(process.env.BACKFILL_BATCH_SIZE || '10', 10);
 
+        console.log(`[ChainListener] Config Loaded: CONFIRMATIONS_N=${CONFIRMATIONS_N}, REORG_GUARD=${REORG_GUARD}, BATCH_SIZE=${BATCH_SIZE}`);
         console.log(`🚀 Starting Chain-First Listener (Confirmations required: ${CONFIRMATIONS_N})...`);
 
         try {
-            await this.initContracts();
+            const contractsReady = await this.initContracts();
+            if (!contractsReady) {
+                console.warn('⚠️  Chain Listener starting in DEGRADED mode (contracts not initialized)');
+                (globalThis as any).ABIS_LOADED = false;
+                return;
+            }
+
+            (globalThis as any).ABIS_LOADED = true;
             await this.loadState();
             await this.backfillEvents();
             this.subscribeToEvents();
         } catch (error) {
             console.error('❌ Chain Listener initialization failed:', error);
             this.isRunning = false;
-            // Retry init after delay
-            setTimeout(() => this.start(), 10000);
+            setTimeout(() => this.start(provider), 10000);
         }
     }
 
-    private async initContracts() {
+    private async initContracts(): Promise<boolean> {
         const nftAddress = process.env.CONTRACT_ADDRESS;
         const marketAddress = process.env.MARKETPLACE_ADDRESS;
 
         if (!nftAddress || !marketAddress) {
-            throw new Error('Contract addresses missing from ENV');
+            console.warn('⚠️  CONTRACT_ADDRESS or MARKETPLACE_ADDRESS missing from .env');
+            return false;
         }
 
-        const nftAbi = JSON.parse(fs.readFileSync(NFT_ABI_PATH, 'utf8')).abi;
-        const marketAbi = JSON.parse(fs.readFileSync(MARKET_ABI_PATH, 'utf8')).abi;
+        const nftAbi = this.safeLoadAbi(NFT_ABI_PATH);
+        const marketAbi = this.safeLoadAbi(MARKET_ABI_PATH);
+
+        if (!nftAbi || !marketAbi) {
+            return false;
+        }
 
         this.nftContract = new ethers.Contract(nftAddress, nftAbi, this.provider);
         this.marketContract = new ethers.Contract(marketAddress, marketAbi, this.provider);
+        return true;
     }
 
     private async loadState() {
         try {
             const state = await SyncStateModel.findOne({ id: 'market_listener' });
+            const REORG_GUARD = parseInt(process.env.REORG_GUARD || '12', 10);
+
             if (state) {
-                // Apply reorg guard on restart
                 this.lastProcessedBlock = Math.max(0, state.lastProcessedBlock - REORG_GUARD);
             } else {
                 const currentBlock = await this.provider.getBlockNumber();
-                this.lastProcessedBlock = Math.max(0, currentBlock - 100); // Arbitrary safe start
+                this.lastProcessedBlock = Math.max(0, currentBlock - 100);
                 await SyncStateModel.create({ id: 'market_listener', lastProcessedBlock: this.lastProcessedBlock });
             }
             console.log(`📌 Starting sync from block ${this.lastProcessedBlock}`);
@@ -108,156 +128,184 @@ export class ChainListener {
         }
     }
 
-    // ==========================================
-    // Event Ingestion
-    // ==========================================
+    // ── Backfill ─────────────────────────────────────────────────────────────
 
     private async backfillEvents() {
-        console.log(`⏳ Backfilling events from ${this.lastProcessedBlock}...`);
+        console.log(`⏳ Backfilling events from block ${this.lastProcessedBlock}...`);
         const latestBlock = await this.provider.getBlockNumber();
-
-        // Adjust BATCH_SIZE to your provider; keep small for free tiers
-        const BATCH_SIZE = 10;
+        const BATCH_SIZE = parseInt(process.env.BACKFILL_BATCH_SIZE || '10', 10);
+        const MAX_RETRIES = parseInt(process.env.BACKFILL_MAX_RETRIES || '3', 10);
 
         for (let from = this.lastProcessedBlock; from <= latestBlock; from += BATCH_SIZE) {
             const to = Math.min(from + BATCH_SIZE - 1, latestBlock);
-            if (from % 10000 === 0) console.log(`Backfilling ${from} to ${to}...`);
+            let retries = 0;
+            let success = false;
 
-            try {
-                // Mint events from NFT contract
-                const mintFilter = this.nftContract!.filters.NFTMinted?.();
-                if (mintFilter) {
-                    const mintLogs = await this.nftContract!.queryFilter(mintFilter, from, to);
-                    for (const log of mintLogs) {
-                        if (!log.transactionHash) continue;
-                        this.enqueueEvent({
-                            type: 'Mint',
-                            blockNumber: log.blockNumber,
-                            logIndex: log.index,
-                            txHash: log.transactionHash,
-                            data: {
-                                tokenId: (log as any).args[0].toString(),
-                                creator: (log as any).args[1],
-                                tokenURI: (log as any).args[2],
-                                metadataHash: (log as any).args[3]
-                            },
-                            processed: false,
-                            attempts: 0
-                        });
-                    }
+            while (retries <= MAX_RETRIES) {
+                try {
+                    await this.processBatch(from, to);
+                    // Only advance lastProcessedBlock after FULL batch success
+                    await this.saveState(to);
+                    success = true;
+                    break;
+                } catch (err: any) {
+                    retries++;
+                    const delay = Math.min(1000 * Math.pow(2, retries), 30000);
+                    console.warn(`[Backfill] Batch ${from}-${to} failed (attempt ${retries}/${MAX_RETRIES}): ${err.message}. Retrying in ${delay}ms...`);
+                    if (retries > MAX_RETRIES) break;
+                    await new Promise(r => setTimeout(r, delay));
                 }
-
-                // ListingCreated events from Market contract
-                const listFilter = this.marketContract!.filters.ListingCreated?.();
-                if (listFilter) {
-                    const listLogs = await this.marketContract!.queryFilter(listFilter, from, to);
-                    for (const log of listLogs) {
-                        if (!log.transactionHash) continue;
-                        this.enqueueEvent({
-                            type: 'List',
-                            blockNumber: log.blockNumber,
-                            logIndex: log.index,
-                            txHash: log.transactionHash,
-                            data: {
-                                onChainListingId: (log as any).args[0].toString(),
-                                owner: (log as any).args[1],
-                                tokenAddress: (log as any).args[2],
-                                tokenId: (log as any).args[3].toString(),
-                                pricePerDay: (log as any).args[4].toString(),
-                                minDuration: (log as any).args[5].toString(),
-                                maxDuration: (log as any).args[6].toString(),
-                                metadataHash: (log as any).args[7]
-                            },
-                            processed: false,
-                            attempts: 0
-                        });
-                    }
-                }
-
-                // Rented events
-                const rentFilter = this.marketContract!.filters.Rented?.();
-                if (rentFilter) {
-                    const rentLogs = await this.marketContract!.queryFilter(rentFilter, from, to);
-                    for (const log of rentLogs) {
-                        if (!log.transactionHash) continue;
-                        this.enqueueEvent({
-                            type: 'Rent',
-                            blockNumber: log.blockNumber,
-                            logIndex: log.index,
-                            txHash: log.transactionHash,
-                            data: {
-                                onChainListingId: (log as any).args[0].toString(),
-                                renter: (log as any).args[1],
-                                tokenAddress: (log as any).args[2],
-                                tokenId: (log as any).args[3].toString(),
-                                expires: (log as any).args[4].toString(),
-                                totalPrice: (log as any).args[5].toString()
-                            },
-                            processed: false,
-                            attempts: 0
-                        });
-                    }
-                }
-
-                // ListingCancelled events
-                const cancelFilter = this.marketContract!.filters.ListingCancelled?.();
-                if (cancelFilter) {
-                    const cancelLogs = await this.marketContract!.queryFilter(cancelFilter, from, to);
-                    for (const log of cancelLogs) {
-                        if (!log.transactionHash) continue;
-                        this.enqueueEvent({
-                            type: 'Cancel',
-                            blockNumber: log.blockNumber,
-                            logIndex: log.index,
-                            txHash: log.transactionHash,
-                            data: {
-                                onChainListingId: (log as any).args[0].toString(),
-                                tokenAddress: (log as any).args[1],
-                                tokenId: (log as any).args[2].toString()
-                            },
-                            processed: false,
-                            attempts: 0
-                        });
-                    }
-                }
-
-                await this.saveState(to);
-            } catch (err: any) {
-                console.error(`Backfill failed at range ${from}-${to}:`, err.message || err);
-                // In production, implement backoff and retries here
-                break;
             }
+
+            if (!success) {
+                // Do NOT advance state — we'll retry from here on next restart
+                console.error(`[Backfill] ⛔ Permanently failed batch ${from}-${to} after ${MAX_RETRIES} retries. Stopping backfill. Last safe block: ${this.lastProcessedBlock}`);
+                return;
+            }
+
+            if (from % 10000 === 0) console.log(`[Backfill] Progress: block ${from}/${latestBlock}`);
         }
+
         console.log('✅ Backfill complete');
     }
 
+    /**
+     * Process all four event types in a single block range.
+     * Throws on any failure — caller handles retry logic.
+     */
+    private async processBatch(from: number, to: number) {
+        if (!this.nftContract || !this.marketContract) return;
+
+        // Mint events
+        const mintFilter = this.nftContract.filters.NFTMinted?.();
+        if (mintFilter) {
+            const mintLogs = await this.nftContract.queryFilter(mintFilter, from, to);
+            for (const log of (mintLogs as any[])) {
+                if (!log.transactionHash) continue;
+                await this.enqueueEvent({
+                    eventName: 'NFTMinted',
+                    blockNumber: log.blockNumber,
+                    logIndex: log.index,
+                    txHash: log.transactionHash,
+                    contractAddress: String(this.nftContract.target),
+                    args: {
+                        tokenId: log.args.tokenId.toString(),
+                        creator: log.args.creator,
+                        tokenURI: log.args.tokenURI,
+                        metadataHash: log.args.metadataHash
+                    },
+                });
+            }
+        }
+
+        // ListingCreated events
+        const listFilter = this.marketContract.filters.ListingCreated?.();
+        if (listFilter) {
+            const listLogs = await this.marketContract.queryFilter(listFilter, from, to);
+            for (const log of (listLogs as any[])) {
+                if (!log.transactionHash) continue;
+                await this.enqueueEvent({
+                    eventName: 'ListingCreated',
+                    blockNumber: log.blockNumber,
+                    logIndex: log.index,
+                    txHash: log.transactionHash,
+                    contractAddress: String(this.marketContract.target),
+                    args: {
+                        onChainListingId: log.args.onChainListingId.toString(),
+                        seller: log.args.seller,
+                        tokenAddress: log.args.tokenAddress,
+                        tokenId: log.args.tokenId.toString(),
+                        pricePerDay: log.args.pricePerDay.toString(),
+                        minDuration: log.args.minDuration.toString(),
+                        maxDuration: log.args.maxDuration.toString(),
+                        metadataHash: log.args.metadataHash
+                    },
+                });
+            }
+        }
+
+        // Rented events
+        const rentFilter = this.marketContract.filters.Rented?.();
+        if (rentFilter) {
+            const rentLogs = await this.marketContract.queryFilter(rentFilter, from, to);
+            for (const log of (rentLogs as any[])) {
+                if (!log.transactionHash) continue;
+                await this.enqueueEvent({
+                    eventName: 'Rented',
+                    blockNumber: log.blockNumber,
+                    logIndex: log.index,
+                    txHash: log.transactionHash,
+                    contractAddress: String(this.marketContract.target),
+                    args: {
+                        onChainListingId: log.args.onChainListingId.toString(),
+                        renter: log.args.renter,
+                        tokenAddress: log.args.tokenAddress,
+                        tokenId: log.args.tokenId.toString(),
+                        expires: log.args.expires.toString(),
+                        totalPrice: log.args.totalPrice.toString()
+                    },
+                });
+            }
+        }
+
+        // ListingCancelled events
+        const cancelFilter = this.marketContract.filters.ListingCancelled?.();
+        if (cancelFilter) {
+            const cancelLogs = await this.marketContract.queryFilter(cancelFilter, from, to);
+            for (const log of (cancelLogs as any[])) {
+                if (!log.transactionHash) continue;
+                await this.enqueueEvent({
+                    eventName: 'ListingCancelled',
+                    blockNumber: log.blockNumber,
+                    logIndex: log.index,
+                    txHash: log.transactionHash,
+                    contractAddress: String(this.marketContract.target),
+                    args: {
+                        onChainListingId: log.args.onChainListingId.toString(),
+                        tokenAddress: log.args.tokenAddress,
+                        tokenId: log.args.tokenId.toString()
+                    },
+                });
+            }
+        }
+    }
+
+    // ── Real-time subscriptions ───────────────────────────────────────────────
+
     private subscribeToEvents() {
-        // Subscribe to Minted
-        this.nftContract!.on('NFTMinted', (tokenId, creator, tokenURI, metadataHash, event) => {
-            if (!event || !event.transactionHash) return;
+        if (!this.nftContract || !this.marketContract) return;
+
+        // Normalize logIndex from real-time event objects (ethers v6 uses .index not .logIndex)
+        const getLogIndex = (event: any): number => {
+            if (typeof event?.index === 'number') return event.index;
+            if (typeof event?.logIndex === 'number') return event.logIndex;
+            return 0;
+        };
+
+        this.nftContract.on('NFTMinted', (tokenId, creator, tokenURI, metadataHash, event) => {
+            if (!event?.transactionHash) return;
             this.enqueueEvent({
-                type: 'Mint',
+                eventName: 'NFTMinted',
                 blockNumber: event.blockNumber,
-                logIndex: event.logIndex,
+                logIndex: getLogIndex(event),
                 txHash: event.transactionHash,
-                data: { tokenId: tokenId.toString(), creator, tokenURI, metadataHash },
-                processed: false,
-                attempts: 0
+                contractAddress: String(this.nftContract!.target),
+                args: { tokenId: tokenId.toString(), creator, tokenURI, metadataHash },
             });
         });
 
-        // Subscribe to ListingCreated
-        this.marketContract!.on('ListingCreated', (...args) => {
+        this.marketContract.on('ListingCreated', (...args) => {
             const event = args[args.length - 1];
-            if (!event || !event.transactionHash) return;
+            if (!event?.transactionHash) return;
             this.enqueueEvent({
-                type: 'List',
+                eventName: 'ListingCreated',
                 blockNumber: event.blockNumber,
-                logIndex: event.index,
+                logIndex: getLogIndex(event),
                 txHash: event.transactionHash,
-                data: {
+                contractAddress: String(this.marketContract!.target),
+                args: {
                     onChainListingId: args[0].toString(),
-                    owner: args[1],
+                    seller: args[1],
                     tokenAddress: args[2],
                     tokenId: args[3].toString(),
                     pricePerDay: args[4].toString(),
@@ -265,59 +313,72 @@ export class ChainListener {
                     maxDuration: args[6].toString(),
                     metadataHash: args[7]
                 },
-                processed: false,
-                attempts: 0
             });
         });
 
-        // Subscribe to ListingCancelled
-        this.marketContract!.on('ListingCancelled', (...args) => {
+        this.marketContract.on('ListingCancelled', (...args) => {
             const event = args[args.length - 1];
-            if (!event || !event.transactionHash) return;
+            if (!event?.transactionHash) return;
             this.enqueueEvent({
-                type: 'Cancel',
+                eventName: 'ListingCancelled',
                 blockNumber: event.blockNumber,
-                logIndex: event.index,
+                logIndex: getLogIndex(event),
                 txHash: event.transactionHash,
-                data: { onChainListingId: args[0].toString(), tokenAddress: args[1], tokenId: args[2].toString() },
-                processed: false,
-                attempts: 0
+                contractAddress: String(this.marketContract!.target),
+                args: { onChainListingId: args[0].toString(), tokenAddress: args[1], tokenId: args[2].toString() },
             });
         });
 
-        // Subscribe to Rented
-        this.marketContract!.on('Rented', (...args) => {
+        this.marketContract.on('Rented', (...args) => {
             const event = args[args.length - 1];
-            if (!event || !event.transactionHash) return;
+            if (!event?.transactionHash) return;
             this.enqueueEvent({
-                type: 'Rent',
+                eventName: 'Rented',
                 blockNumber: event.blockNumber,
-                logIndex: event.index,
+                logIndex: getLogIndex(event),
                 txHash: event.transactionHash,
-                data: { onChainListingId: args[0].toString(), renter: args[1], tokenAddress: args[2], tokenId: args[3].toString(), expires: args[4].toString(), totalPrice: args[5].toString() },
-                processed: false,
-                attempts: 0
+                contractAddress: String(this.marketContract!.target),
+                args: {
+                    onChainListingId: args[0].toString(),
+                    renter: args[1],
+                    tokenAddress: args[2],
+                    tokenId: args[3].toString(),
+                    expires: args[4].toString(),
+                    totalPrice: args[5].toString()
+                },
             });
         });
+
+        console.log('👂 Subscribed to real-time contract events');
     }
 
+    // ── Event ledger upsert (idempotent) ─────────────────────────────────────
+
     private async enqueueEvent(ev: QueuedEvent) {
+        if (typeof ev.logIndex !== 'number' || isNaN(ev.logIndex)) {
+            console.warn(`[ChainListener] ⚠️ Event ${ev.txHash} has invalid logIndex=${ev.logIndex}. Skipping.`);
+            return;
+        }
         try {
             await EventModel.updateOne(
                 { txHash: ev.txHash, logIndex: ev.logIndex },
                 {
                     $setOnInsert: {
                         blockNumber: ev.blockNumber,
-                        data: ev.data,
+                        contractAddress: ev.contractAddress.toLowerCase(),
+                        eventName: ev.eventName,
+                        args: ev.args,
                         status: 'pending',
-                        attempts: 0,
-                        createdAt: new Date()
+                        retries: 0
                     }
                 },
                 { upsert: true }
             );
-        } catch (err) {
-            console.error('Error enqueueing event:', err);
+        } catch (err: any) {
+            // E11000 = duplicate key — benign, event already in ledger
+            if (err?.code !== 11000) {
+                console.error('[ChainListener] Error enqueueing event:', err);
+            }
         }
     }
 }

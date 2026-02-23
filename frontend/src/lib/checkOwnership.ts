@@ -12,7 +12,7 @@ const NFT_ABI = [
 ];
 
 export async function verifyOwnership(contractAddress: `0x${string}`, tokenId: bigint, user: `0x${string}`) {
-    const owner = await readContract(config, {
+    const owner = await readContract(config as any, {
         address: contractAddress as `0x${string}`,
         abi: NFT_ABI,
         functionName: "ownerOf",

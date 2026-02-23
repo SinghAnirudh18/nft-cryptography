@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { UserStats, ApiResponse } from '../types/index.js';
+import { UserStats } from '../types/index.js';
 import { UserModel } from '../models/User.js';
 import { NFTModel } from '../models/NFT.js';
 import { RentalModel } from '../models/Rental.js';
@@ -11,51 +11,48 @@ import { ListingModel } from '../models/Listing.js';
 export const getUserStats = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
+        const normalizedId = id.toLowerCase();
 
-        // Get user's NFTs
-        const userNFTs = await NFTModel.find({ owner: id });
+        // 1. Get user's NFTs (directly from NFTModel facts)
+        const userNFTs = await NFTModel.find({ owner: normalizedId });
 
-        // Calculate total value
-        const totalValue = userNFTs.reduce((sum, nft) => sum + (nft.price || 0), 0);
-
-        // Count actual active listings (NFTs listed on marketplace)
-        const activeListings = await ListingModel.countDocuments({ sellerId: id, status: 'ACTIVE' });
-
-        // Active Rentals (as Tenant)
-        const activeRentalsCount = await RentalModel.countDocuments({
-            renterId: id,
+        // 2. Count active listings (using sellerAddress)
+        const activeListings = await ListingModel.countDocuments({
+            sellerAddress: normalizedId,
             status: 'ACTIVE'
         });
 
-        // Total Earnings (as Landlord)
-        const ownerRentals = await RentalModel.find({ ownerId: id });
-        const totalEarnings = ownerRentals.reduce((sum, rental) => sum + (rental.rentalPrice || 0), 0);
+        // 3. Active Rentals (as Renter)
+        const activeRentalsCount = await RentalModel.countDocuments({
+            renter: normalizedId,
+            status: 'ACTIVE'
+        });
 
-        // Active Rentals (as Landlord) - items currently rented OUT
+        // 4. Total Earnings (as Owner)
+        const ownerRentals = await RentalModel.find({ owner: normalizedId });
+        const totalEarnings = ownerRentals.reduce((sum, rental) => {
+            return sum + (parseFloat(rental.totalPrice || '0') / 1e18); // assuming totalPrice is in wei
+        }, 0);
+
+        // 5. Active Rented Out (as Owner)
         const activeRentedOutCount = await RentalModel.countDocuments({
-            ownerId: id,
+            owner: normalizedId,
             status: 'ACTIVE'
         });
 
         const stats: UserStats = {
             totalNFTs: userNFTs.length,
-            totalValue: totalValue.toFixed(2),
+            totalValue: '0.00', // We no longer track 'value' on the NFT model itself
             activeListings,
-            totalRentals: activeRentalsCount, // Active rentals as user (tenant)
+            totalRentals: activeRentalsCount,
             totalEarnings: totalEarnings.toFixed(4),
             activeRentedOut: activeRentedOutCount,
             currency: 'ETH'
         };
 
-        res.status(200).json({
-            status: 'success',
-            data: stats
-        });
+        res.status(200).json({ status: 'success', data: stats });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
@@ -65,7 +62,7 @@ export const getUserStats = async (req: Request, res: Response) => {
 export const getOwnedNFTs = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const ownedNFTs = await NFTModel.find({ owner: id });
+        const ownedNFTs = await NFTModel.find({ owner: id.toLowerCase() }).lean();
 
         res.status(200).json({
             status: 'success',
@@ -73,42 +70,36 @@ export const getOwnedNFTs = async (req: Request, res: Response) => {
             message: `Found ${ownedNFTs.length} owned NFTs`
         });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
 /**
- * Get user's rented NFTs (Items user is renting from others)
+ * Get user's rented NFTs (Items user is renting)
  */
 export const getRentedNFTs = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-
-        // Find active rentals where user is renter
-        // We need to also fetch the NFT details. 
-        // In a real app, populate() would work if refs are set up correctly.
-        // Here we'll do a two-step lookup if specific populate is tricky with current schema/types.
+        const normalizedId = id.toLowerCase();
 
         const activeRentals = await RentalModel.find({
-            renterId: id,
+            renter: normalizedId,
             status: 'ACTIVE'
-        });
+        }).lean();
 
-        const nftIds = activeRentals.map(r => r.nftId);
-        const nfts = await NFTModel.find({ id: { $in: nftIds } });
+        // Enrich with NFT data using compound keys
+        const enrichedNFTs = await Promise.all(activeRentals.map(async (rental) => {
+            const nft = await NFTModel.findOne({
+                tokenAddress: rental.tokenAddress,
+                tokenId: rental.tokenId
+            }).lean();
 
-        // Merge rental info (endDate) into NFT object for frontend display
-        const enrichedNFTs = nfts.map(nft => {
-            const rental = activeRentals.find(r => r.nftId === nft.id);
             return {
-                ...nft.toObject(),
-                rentalEndDate: rental?.endDate,
-                timeLeft: rental ? calculateTimeLeft(rental.endDate) : 'Expired'
+                ...(nft || {}),
+                rentalEndDate: rental.expiresAt,
+                timeLeft: rental.expiresAt ? calculateTimeLeft(rental.expiresAt) : 'Expired'
             };
-        });
+        }));
 
         res.status(200).json({
             status: 'success',
@@ -116,10 +107,7 @@ export const getRentedNFTs = async (req: Request, res: Response) => {
             message: `Found ${enrichedNFTs.length} rented NFTs`
         });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
@@ -129,20 +117,20 @@ export const getRentedNFTs = async (req: Request, res: Response) => {
 export const getUserListings = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
+        const normalizedId = id.toLowerCase();
 
-        // Get actual active listings from ListingModel
         const listings = await ListingModel.find({
-            sellerId: id,
+            sellerAddress: normalizedId,
             status: 'ACTIVE'
-        });
+        }).lean();
 
-        // Enrich with NFT data
         const enrichedListings = await Promise.all(listings.map(async (listing) => {
-            const nft = await NFTModel.findOne({ id: listing.nftId });
-            return {
-                ...listing.toObject(),
-                nft
-            };
+            const nft = await NFTModel.findOne({
+                tokenAddress: listing.tokenAddress,
+                tokenId: listing.tokenId
+            }).lean();
+
+            return { ...listing, nft };
         }));
 
         res.status(200).json({
@@ -151,77 +139,66 @@ export const getUserListings = async (req: Request, res: Response) => {
             message: `Found ${enrichedListings.length} active listings`
         });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
 /**
- * Get User Rental History (Items user rented in past)
+ * Get User Rental History
  */
 export const getRentalHistory = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const history = await RentalModel.find({ renterId: id }).sort({ createdAt: -1 });
+        const normalizedId = id.toLowerCase();
 
-        // Populate NFT names/images manually or via populate
-        // Doing manual for safety with current schema
-        const nftIds = history.map(r => r.nftId);
-        const nfts = await NFTModel.find({ id: { $in: nftIds } }); // mapping by custom id
+        const history = await RentalModel.find({ renter: normalizedId }).sort({ createdAt: -1 }).lean();
 
-        const richHistory = history.map(rental => {
-            const nft = nfts.find(n => n.id === rental.nftId);
+        const richHistory = await Promise.all(history.map(async (rental) => {
+            const nft = await NFTModel.findOne({
+                tokenAddress: rental.tokenAddress,
+                tokenId: rental.tokenId
+            }).lean();
+
             return {
-                id: rental._id,
+                id: (rental as any)._id,
                 nftName: nft?.name || 'Unknown NFT',
                 nftImage: nft?.image,
-                startDate: rental.startDate,
-                endDate: rental.endDate,
-                price: rental.rentalPrice,
+                startDate: rental.startAt,
+                endDate: rental.expiresAt,
+                price: rental.totalPrice,
                 status: rental.status
             };
-        });
+        }));
 
-        res.status(200).json({
-            status: 'success',
-            data: richHistory
-        });
+        res.status(200).json({ status: 'success', data: richHistory });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
 /**
- * Get User Earnings History (Items user rented OUT)
+ * Get User Earnings History
  */
 export const getEarningsHistory = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const earnings = await RentalModel.find({ ownerId: id }).sort({ createdAt: -1 });
+        const normalizedId = id.toLowerCase();
+
+        const earnings = await RentalModel.find({ owner: normalizedId }).sort({ createdAt: -1 }).lean();
 
         const richEarnings = earnings.map(rental => ({
-            id: rental._id,
-            nftId: rental.nftId, // could populate name
-            renterId: rental.renterId, // could populate username
-            amount: rental.rentalPrice,
+            id: (rental as any)._id,
+            tokenAddress: rental.tokenAddress,
+            tokenId: rental.tokenId,
+            renter: rental.renter,
+            amount: rental.totalPrice,
             date: rental.createdAt,
             status: rental.status
         }));
 
-        res.status(200).json({
-            status: 'success',
-            data: richEarnings
-        });
+        res.status(200).json({ status: 'success', data: richEarnings });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
@@ -231,24 +208,17 @@ export const getEarningsHistory = async (req: Request, res: Response) => {
 export const getUserProfile = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const user = await UserModel.findOne({ id: id });
+        const normalizedId = id.toLowerCase();
 
-        if (!user) {
-            return res.status(404).json({
-                status: 'error',
-                error: 'User not found'
-            });
-        }
-
-        res.status(200).json({
-            status: 'success',
-            data: user
+        // Profiles are indexed by either 'id' or 'walletAddress' (standardized to address)
+        const user = await UserModel.findOne({
+            $or: [{ id: normalizedId }, { walletAddress: normalizedId }]
         });
+
+        if (!user) return res.status(404).json({ status: 'error', error: 'User not found' });
+        res.status(200).json({ status: 'success', data: user });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
@@ -258,30 +228,18 @@ export const getUserProfile = async (req: Request, res: Response) => {
 export const updateUserProfile = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
+        const normalizedId = id.toLowerCase();
 
         const user = await UserModel.findOneAndUpdate(
-            { id: id },
+            { $or: [{ id: normalizedId }, { walletAddress: normalizedId }] },
             { $set: req.body },
             { new: true, runValidators: true }
         );
 
-        if (!user) {
-            return res.status(404).json({
-                status: 'error',
-                error: 'User not found'
-            });
-        }
-
-        res.status(200).json({
-            status: 'success',
-            data: user,
-            message: 'Profile updated successfully'
-        });
+        if (!user) return res.status(404).json({ status: 'error', error: 'User not found' });
+        res.status(200).json({ status: 'success', data: user, message: 'Profile updated successfully' });
     } catch (error: any) {
-        res.status(500).json({
-            status: 'error',
-            error: error.message
-        });
+        res.status(500).json({ status: 'error', error: error.message });
     }
 };
 
@@ -299,5 +257,3 @@ function calculateTimeLeft(endDate: Date): string {
     if (days > 0) return `${days}d ${hours}h`;
     return `${hours}h left`;
 }
-
-

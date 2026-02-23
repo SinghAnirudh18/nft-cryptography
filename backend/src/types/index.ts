@@ -12,9 +12,7 @@ export interface NFT {
     rentalPrice?: number;
     maxDuration?: number;
     currency: string;
-    status: 'AVAILABLE' | 'RENTED' | 'LISTING';
-    isEscrowed?: boolean;
-    renterWallet?: string;
+    renter?: string; // Renamed from renterWallet
     expiresAt?: Date;
     likes: number;
     views?: number;
@@ -49,7 +47,8 @@ export interface Rental {
     startAt?: Date;
     expiresAt?: Date;
     status: 'PENDING' | 'ACTIVE';
-    transactionHash?: string;
+    txHash: string; // Unified naming
+    logIndex?: number;
     createdAt?: Date;
 }
 
@@ -70,7 +69,7 @@ export interface Listing {
     minDuration?: number;
     maxDuration?: number;
     metadataHash?: string;
-    status: 'LOCAL_DRAFT' | 'PENDING_CREATE' | 'ACTIVE' | 'PENDING_CANCEL' | 'CANCELLED' | 'RENTED';
+    status: 'LOCAL_DRAFT' | 'PENDING_CREATE' | 'ACTIVE' | 'PENDING_CANCEL' | 'CANCELLED' | 'RENTED' | 'LEGACY_ARCHIVED';
     views: number;
     likes: number;
     confirmed?: boolean;

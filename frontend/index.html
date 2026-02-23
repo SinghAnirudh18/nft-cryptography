@@ -1,12 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DAO Marketplace</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DAO Marketplace</title>
+  <script>
+    window.global = window;
+    window.process = { env: {}, nextTick: function (f) { setTimeout(f, 0); } };
+    window.Buffer = {
+      isBuffer: function () { return false; },
+      from: function () { return []; },
+      alloc: function () { return { fill: function () { } }; }
+    };
+    // Simple util polyfill for libraries that expect it
+    window.util = {
+      inspect: function (obj) { return JSON.stringify(obj); },
+      inherits: function (ctor, superCtor) {
+        if (superCtor) {
+          ctor.super_ = superCtor;
+          ctor.prototype = Object.create(superCtor.prototype, {
+            constructor: { value: ctor, enumerable: false, writable: true, configurable: true }
+          });
+        }
+      }
+    };
+  </script>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>

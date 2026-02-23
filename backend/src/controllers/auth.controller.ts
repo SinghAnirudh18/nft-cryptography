@@ -37,9 +37,9 @@ export const register = async (req: Request, res: Response) => {
 
         // Create user
         const user = await UserModel.create({
-            id: Date.now().toString(), // Custom ID for now to match frontend
+            id: email.toLowerCase(), // Use email or walletAddress as ID, not a timestamp
             username,
-            email,
+            email: email.toLowerCase(),
             password: hashedPassword,
             createdAt: new Date()
         });
@@ -137,7 +137,6 @@ export const getNonce = async (req: Request, res: Response) => {
                 nonce: nonceHash, // STORE HASH, NOT RAW NONCE
                 nonceExpiresAt: expiresAt,
                 username: `User ${normalizedAddress.slice(0, 6)}`,
-                email: `${normalizedAddress}@placeholder.com`,
                 profileImage: `https://api.dicebear.com/7.x/identicon/svg?seed=${normalizedAddress}` // Default Avatar
             });
         } else {
@@ -167,34 +166,38 @@ export const verify = async (req: Request, res: Response) => {
 
         const normalizedAddress = walletAddress.toLowerCase();
 
-        // 1. Fetch User & Stored Nonce Hash
-        const user = await UserModel.findOne({ walletAddress: normalizedAddress });
+        // 1 & 2 & 4: Atomic Fetch, Expiry Check, and Nonce Consumption
+        // findOneAndUpdate ensures that if two concurrent requests hit this, only one gets the user document with the nonce.
+        const user = await UserModel.findOneAndUpdate(
+            {
+                walletAddress: normalizedAddress,
+                nonce: { $exists: true, $ne: null },
+                nonceExpiresAt: { $gt: new Date() }
+            },
+            {
+                $unset: { nonce: "", nonceExpiresAt: "" }
+            },
+            { new: false } // return the document BEFORE the update so we still have the nonce hash to verify
+        );
 
         if (!user || !user.nonce) {
-            return res.status(404).json({ error: 'Nonce not found. Please request a new nonce.' });
-        }
-
-        // 2. Check Expiration
-        if (user.nonceExpiresAt && new Date() > user.nonceExpiresAt) {
-            return res.status(400).json({ error: 'Nonce expired. Please request a new nonce.' });
+            return res.status(401).json({ error: 'Nonce invalid, expired, or already consumed. Please request a new nonce.' });
         }
 
         // 3. Authenticate via CryptoService (The Firewall)
+        // Note: authenticateSIWE is actually async in our new implementation.
         const authResult = await CryptoService.authenticateSIWE(
             message,
             signature,
             normalizedAddress,
-            user.nonce // Pass the stored HASH
+            user.nonce // Pass the stored HASH from the atomically retrieved document
         );
 
         if (!authResult.success) {
+            // Re-auth failed (e.g. bad signature) — the nonce was consumed above, which is correct
+            // (a failed attempt should burn the nonce anyway).
             return res.status(401).json({ error: authResult.error || 'Authentication failed' });
         }
-
-        // 4. Consume Nonce (Prevent Replay)
-        user.nonce = undefined;
-        user.nonceExpiresAt = undefined;
-        await user.save();
 
         // 5. Issue Token
         const token = generateToken(user.id);

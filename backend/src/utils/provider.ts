@@ -1,48 +1,65 @@
 import { ethers } from 'ethers';
+import { isNonEmptyString, assertValidRpcUrl } from './typeguards.js';
 
 /**
- * Creates a dynamic, highly-available provider using multiple fallback JSON-RPC endpoints.
- * This ensures smooth UX even if a specific RPC (like Alchemy or Infura) goes down or has an invalid key.
+ * Creates a read-only provider for the configured chain.
+ *
+ * ARCHITECTURE NOTE: This provider is INTENTIONALLY read-only.
+ * The backend is a blockchain observer — it reads events and state.
+ * It NEVER signs transactions or holds a private key.
+ * All write operations (mint, list, rent, cancel) are signed by the USER'S wallet via MetaMask/WalletConnect.
+ *
+ * Chain ID is driven by CHAIN_ID env var so this works for any EVM network.
  */
 export function getDynamicProvider(): ethers.Provider {
     const rawUrls = [
         process.env.RPC_URL,
         process.env.SEPOLIA_RPC,
         process.env.TESTNET_RPC_URL,
-        // We removed the generic public nodes because they sporadically glitch and return Mainnet (1) 
-        // to `eth_chainId` polling, which causes ethers v6 FallbackProvider to panic and violently crash.
+        process.env.SEPOLIA_RPC_FALLBACK,
+        process.env.PUBLIC_RPC,
     ];
 
-    // Filter out undefined, empty, and duplicates
-    const uniqueUrls = [...new Set(rawUrls.filter(url => Boolean(url) && url!.trim() !== ''))] as string[];
+    // Filter empty/undefined, deduplicate, and validate URLs
+    const uniqueUrls = [...new Set(rawUrls.filter(isNonEmptyString))];
 
-    const providers = uniqueUrls.map((url, index) => {
-        // Assign higher weights/priority to user-provided environment configs
-        // Priority 1 is highest priority. Ethers sends requests to Priority 1 first.
-        const priority = index < 3 ? 1 : 2;
-
-        if (url.startsWith('ws')) {
-            return { provider: new ethers.WebSocketProvider(url), priority, weight: 1 };
-        }
-
-        // Sepolia Testnet ID is 11155111.
-        const staticNetwork = ethers.Network.from(11155111);
-
-        const provider = new ethers.JsonRpcProvider(url, staticNetwork, { staticNetwork: true });
-
-        return {
-            provider: provider,
-            priority,
-            weight: 1
-        };
-    });
-
-    if (providers.length === 1) {
-        return providers[0].provider;
+    if (uniqueUrls.length === 0) {
+        throw new Error('No RPC URL configured. Set SEPOLIA_RPC or RPC_URL in .env');
     }
 
-    // Ethers v6 FallbackProvider defaults to requiring a quorum (consensus) across multiple RPCs.
-    // If one RPC is slightly out of sync or rejects the eth_getLogs block range, the entire call crashes.
-    // Setting `quorum: 1` ensures that as long as ANY single priority sub-provider succeeds, the call returns.
-    return new ethers.FallbackProvider(providers, 1);
+    // Read chain ID from env — defaults to Sepolia (11155111) for safety
+    const chainId = parseInt(process.env.CHAIN_ID || '11155111', 10);
+
+    const providerEntries: any[] = [];
+
+    for (const url of uniqueUrls) {
+        try {
+            const validatedUrl = assertValidRpcUrl(url);
+            const priority = providerEntries.length === 0 ? 1 : 2;
+
+            if (validatedUrl.startsWith('ws://') || validatedUrl.startsWith('wss://')) {
+                providerEntries.push({ provider: new ethers.WebSocketProvider(validatedUrl), priority, weight: 1 });
+                continue;
+            }
+
+            // staticNetwork prevents eth_chainId polling, which can return wrong chain
+            // on some free-tier RPCs that serve multiple networks.
+            const staticNetwork = ethers.Network.from(chainId);
+            const provider = new ethers.JsonRpcProvider(validatedUrl, staticNetwork, { staticNetwork: true });
+            providerEntries.push({ provider, priority, weight: 1 });
+        } catch (err: any) {
+            console.warn(`⚠️  Skipping invalid RPC URL "${url}": ${err.message}`);
+        }
+    }
+
+    if (providerEntries.length === 0) {
+        throw new Error('No valid RPC URLs could be initialized. Check your .env configuration.');
+    }
+
+    if (providerEntries.length === 1) {
+        return providerEntries[0].provider;
+    }
+
+    // quorum:1 — any single provider succeeding is enough.
+    return new ethers.FallbackProvider(providerEntries, 1);
 }

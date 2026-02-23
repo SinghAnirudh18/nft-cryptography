@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useSignMessage, useAccount } from 'wagmi';
+import api from '../api/client';
 
 
 interface User {
@@ -36,15 +37,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
 
             try {
-                const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-                const response = await fetch(`${apiBaseUrl}/auth/verify-token`, {
-                    headers: {
-                        'Authorization': `Bearer ${currentToken}`
-                    }
-                });
+                const response = await api.get('/auth/verify-token');
 
-                if (response.ok) {
-                    const data = await response.json();
+                if (response.status === 200) {
+                    const data = response.data;
                     if (data.valid && data.user) {
                         setUser(data.user);
                     } else {
@@ -86,15 +82,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const loginWithWallet = async (address: string) => {
         try {
             setLoading(true);
-            const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-
             // 1. Get Nonce from backend (with cache control)
-            const nonceResponse = await fetch(`${apiBaseUrl}/auth/nonce/${address}?t=${Date.now()}`, {
-                cache: 'no-store'
-            });
-            const nonceData = await nonceResponse.json();
+            const nonceResponse = await api.get(`/auth/nonce/${address}?t=${Date.now()}`);
+            const nonceData = nonceResponse.data;
 
-            if (!nonceResponse.ok || !nonceData.nonce) {
+            if (nonceResponse.status !== 200 || !nonceData.nonce) {
                 throw new Error(nonceData.error || 'Failed to get nonce');
             }
 
@@ -119,15 +111,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const signature = await signMessageAsync({ message });
 
             // 4. Verify signature on backend
-            const verifyResponse = await fetch(`${apiBaseUrl}/auth/verify`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ walletAddress: address, signature, message })
-            });
+            const verifyResponse = await api.post('/auth/verify', { walletAddress: address, signature, message });
 
-            const verifyData = await verifyResponse.json();
+            const verifyData = verifyResponse.data;
 
-            if (verifyResponse.ok && verifyData.token) {
+            if (verifyResponse.status === 200 && verifyData.token) {
                 login(verifyData.token, verifyData.user);
                 setLoading(false);
                 return true;

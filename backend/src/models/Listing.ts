@@ -1,33 +1,24 @@
 import mongoose from 'mongoose';
-import { Listing } from '../types/index.js';
 
-const listingSchema = new mongoose.Schema<Listing>({
-    // -------- CHAIN IDENTITY (PRIMARY KEY) --------
-    onChainListingId: { type: Number },
-    tokenAddress: { type: String, required: true, lowercase: true },
-    tokenId: { type: String, required: true },
+const listingSchema = new mongoose.Schema({
+    // -------- AUTHORITATIVE IDENTITY (BLOCKCHAIN TRUTH) --------
+    onChainListingId: { type: Number, index: true },
+    tokenAddress: { type: String, required: true, lowercase: true, index: true },
+    tokenId: { type: String, required: true, index: true },
 
-    // Optional local draft reference (NOT identity)
-    id: { type: String, unique: true, sparse: true },
-    nftId: { type: String },
+    // -------- OWNERSHIP SNAPSHOT (MARKETPLACE CORRECTNESS) --------
+    sellerAddress: { type: String, required: true, lowercase: true, index: true },
 
-    // -------- OWNER --------
-    seller: { type: String, required: true, lowercase: true },
-    sellerId: { type: String }, // Legacy compatibility
-
-    // -------- ECONOMICS --------
-    pricePerDay: { type: String }, // store wei string
-    price: { type: String }, // Legacy compatibility
-    rentalPrice: { type: String }, // Legacy compatibility
-    minDuration: { type: Number, required: true },
-    maxDuration: { type: Number, required: true },
-    duration: { type: Number }, // Legacy compatibility
-    currency: { type: String, default: 'ETH' },
+    // -------- DATA --------
+    pricePerDay: { type: String, required: true },
+    minDuration: { type: Number, default: 1 },
+    maxDuration: { type: Number },
+    metadataHash: { type: String },
 
     // -------- STATE --------
     status: {
         type: String,
-        enum: ['LOCAL_DRAFT', 'PENDING_CREATE', 'ACTIVE', 'PENDING_CANCEL', 'CANCELLED', 'RENTED'],
+        enum: ['LOCAL_DRAFT', 'PENDING_CREATE', 'ACTIVE', 'PENDING_CANCEL', 'CANCELLED', 'RENTED', 'LEGACY_ARCHIVED'],
         default: 'LOCAL_DRAFT',
         index: true
     },
@@ -36,48 +27,27 @@ const listingSchema = new mongoose.Schema<Listing>({
     blockNumber: { type: Number },
     confirmedAt: { type: Date },
 
-    // -------- VERIFICATION --------
-    metadataHash: { type: String },
-    tokenURI: { type: String },
-    type: { type: String, default: 'rent' },
-
     // -------- ANALYTICS --------
     views: { type: Number, default: 0 },
     likes: { type: Number, default: 0 },
 
-    createdAt: { type: Date, default: Date.now }
+    // App internal linking
+    id: { type: String, unique: true },
+    nftId: { type: String }, // Legacy DB ID for frontend compat if needed
+}, {
+    timestamps: true
 });
 
 /**
- * TRUE UNIQUE LISTING
- * One on-chain listing = one DB document
+ * PREVENT STALE LISTINGS
+ * Ensure only one ACTIVE listing exists per NFT+Seller combination.
  */
 listingSchema.index(
-    { onChainListingId: 1, tokenAddress: 1 },
+    { tokenAddress: 1, tokenId: 1, status: 1 },
     {
         unique: true,
-        partialFilterExpression: {
-            onChainListingId: { $exists: true, $ne: null }
-        }
+        partialFilterExpression: { status: 'ACTIVE' }
     }
 );
 
-/**
- * Fast lookup by NFT
- */
-listingSchema.index(
-    { tokenAddress: 1, tokenId: 1, status: 1 }
-);
-
-/**
- * Only delete drafts that never got a tx
- */
-listingSchema.index(
-    { createdAt: 1 },
-    {
-        expireAfterSeconds: 172800,
-        partialFilterExpression: { status: 'draft' }
-    }
-);
-
-export const ListingModel = mongoose.model<Listing>('Listing', listingSchema);
+export const ListingModel = mongoose.model('Listing', listingSchema);

@@ -25,6 +25,20 @@ router.post('/notify', protect, marketplaceController.notifyListingTx);
  */
 router.delete('/listings/:id/cancel', protect, marketplaceController.deleteDraftListing);
 
+/**
+ * @route   POST /api/marketplace/cancel/generate
+ * @desc    Generate tx for on-chain cancellation
+ * @access  Private
+ */
+router.post('/cancel/generate', protect, marketplaceController.generateCancelTx);
+
+/**
+ * @route   POST /api/marketplace/cancel/notify
+ * @desc    Notify backend of cancel tx
+ * @access  Private
+ */
+router.post('/cancel/notify', protect, marketplaceController.notifyCancelTx);
+
 
 /**
  * @route   GET /api/marketplace

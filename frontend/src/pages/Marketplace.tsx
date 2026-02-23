@@ -89,15 +89,26 @@ const Marketplace = () => {
 
   const mapResponseToNFTs = (data: any[]): NFT[] => {
     if (!Array.isArray(data)) return [];
-    return data.map((item: any) => ({
-      ...item.nft,
-      id: item.nft.id,
-      collectionName: item.nft.collectionName || item.nft.collection, // Fallback for legacy
-      price: item.price,
-      rentalPrice: item.rentalPrice || item.nft.rentalPrice,
-      status: ['LOCAL_DRAFT', 'PENDING_CREATE', 'PENDING_CANCEL'].includes(item.status) ? 'published_pending' : (item.status === 'RENTED' ? 'rented' : 'listing'),
-      confirmed: item.confirmed
-    }));
+    return data
+      .filter((item: any) => item.status !== 'LEGACY_ARCHIVED')
+      .map((item: any) => ({
+        // Spread the nested nft sub-doc first (name, image, description, etc.)
+        ...item.nft,
+        // Then override with listing-level fields that are authoritative for renting
+        id: item.nft?.id || item.nft?._id,
+        tokenId: item.tokenId?.toString() || item.nft?.tokenId?.toString(),
+        tokenAddress: item.tokenAddress || item.nft?.tokenAddress,
+        onChainListingId: item.onChainListingId,              // needed by RentConfirmModal
+        listingId: item.id,                                   // the DB listing id (for notify)
+        collectionName: item.nft?.collectionName || item.nft?.collection,
+        price: item.price || item.pricePerDay,
+        rentalPrice: item.rentalPrice || item.nft?.rentalPrice,
+        // Normalise status to the set expected by NFTCard
+        status: ['LOCAL_DRAFT', 'PENDING_CREATE', 'PENDING_CANCEL', 'PENDING'].includes(item.status)
+          ? 'published_pending'
+          : item.status === 'RENTED' ? 'rented' : 'listing',
+        confirmed: item.confirmed
+      }));
   };
 
   const [isRentModalOpen, setIsRentModalOpen] = useState(false);
@@ -196,7 +207,7 @@ const Marketplace = () => {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {trendingNfts.map(nft => (
-                <NFTCard key={nft.id} nft={nft} status={nft.status === 'rented' ? 'rented' : (nft.status === 'published_pending' ? 'published_pending' : 'listing')} onAction={handleRentAction} />
+                <NFTCard key={nft.id} nft={nft} status={nft.status as any} onAction={handleRentAction} />
               ))}
               {!isLoading && trendingNfts.length === 0 && (
                 <div className="col-span-full py-12 text-center bg-zinc-900/50 rounded-2xl border border-white/5">
@@ -224,7 +235,7 @@ const Marketplace = () => {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {newArrivals.map(nft => (
-                <NFTCard key={nft.id} nft={nft} status={nft.status === 'rented' ? 'rented' : (nft.status === 'published_pending' ? 'published_pending' : 'listing')} onAction={handleRentAction} />
+                <NFTCard key={nft.id} nft={nft} status={nft.status as any} onAction={handleRentAction} />
               ))}
               {isLoading && newArrivals.length === 0 && <p className="text-gray-500 col-span-full opacity-50 pl-4">Loading new arrivals...</p>}
             </div>
@@ -291,7 +302,7 @@ const Marketplace = () => {
                 <NFTCard
                   key={nft.id}
                   nft={nft}
-                  status={nft.status === 'rented' ? 'rented' : (nft.status === 'published_pending' ? 'published_pending' : 'listing')}
+                  status={nft.status as any}
                   onAction={handleRentAction}
                 />
               ))

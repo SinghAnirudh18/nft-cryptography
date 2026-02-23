@@ -76,6 +76,7 @@ typings/
 .env.production
 .env.local
 .env.*.local
+.env.hardhat
 !*.example
 
 # Parcel-bundler cache (https://parceljs.org/)

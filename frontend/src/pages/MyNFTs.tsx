@@ -50,7 +50,7 @@ const MyNFTs = () => {
     if (user?.id) {
       fetchUserData();
     }
-  }, [user]);
+  }, [user?.id]);
 
   if (authLoading) {
     return (
@@ -102,10 +102,10 @@ const MyNFTs = () => {
       const userStats: UserStats = statsRes.data.data;
       setStats({
         totalNFTs: userStats.totalNFTs || 0,
-        totalValue: `${userStats.totalValue || 0} ETH`,
+        totalValue: `${userStats.totalValue || 0} ${userStats.currency || 'ETH'}`,
         activeListings: userStats.activeListings || 0,
         totalRentals: userStats.totalRentals || 0,
-        totalEarnings: `${userStats.totalEarnings || 0} ETH`,
+        totalEarnings: `${userStats.totalEarnings || 0} ${userStats.currency || 'ETH'}`,
         activeRentedOut: userStats.activeRentedOut || 0
       });
 
@@ -491,7 +491,7 @@ const MyNFTs = () => {
                             <NFTCard
                               key={listing.id}
                               nft={{ ...listing.nft, id: listing.nft.id || listing.nftId, collectionName: listing.nft?.collectionName || listing.nft?.collection, price: listing.price, rentalPrice: listing.rentalPrice }}
-                              status={['LOCAL_DRAFT', 'PENDING_CREATE', 'PENDING_CANCEL'].includes(listing.status) ? 'published_pending' : (listing.status === 'RENTED' ? 'rented' : 'listing')}
+                              status={['LOCAL_DRAFT', 'PENDING_CREATE', 'PENDING_CANCEL', 'PENDING'].includes(listing.status) ? 'published_pending' : (listing.status === 'RENTED' ? 'rented' : 'listing')}
                               isOwner={true}
                               onAction={handleAction}
                             />

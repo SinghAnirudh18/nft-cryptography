@@ -11,10 +11,6 @@ export interface NFT {
     creator: string;
     owner?: string;
     tokenId?: string;
-    tokenAddress?: string;
-    contractAddress?: string;
-    status: 'AVAILABLE' | 'RENTED' | 'LISTING';
-    isEscrowed?: boolean;
     maxDuration?: number;
     renterWallet?: string;
     expiresAt?: Date;
@@ -25,6 +21,11 @@ export interface NFT {
     mintStatus?: 'DRAFT' | 'PENDING' | 'CONFIRMED' | 'FAILED';
     metadataHash?: string;
     mintTxHash?: string;
+    status?: string; // Authoritative state (e.g., 'RENTED', 'ACTIVE')
+    tokenAddress?: string;
+    contractAddress?: string;
+    onChainListingId?: number;
+    listingId?: string;
 }
 
 export interface User {
@@ -78,9 +79,10 @@ export interface EarningHistoryItem {
 
 export interface UserStats {
     totalNFTs: number;
-    totalValue: number;
+    totalValue: string;
     activeListings: number;
     totalRentals: number;
-    totalEarnings: number;
+    totalEarnings: string;
     activeRentedOut: number;
+    currency?: string;
 }
