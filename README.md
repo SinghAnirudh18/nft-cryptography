@@ -19,6 +19,15 @@ Built with **React**, **Node.js**, **Express**, **MongoDB**, **Hardhat**, **Wagm
 
 ---
 
+## VC Technical Diligence Script
+
+For fundraising and deep technical diligence Q&A, use the dedicated playbook:
+
+- [`docs/VC_TECH_STACK_PLAYBOOK.md`](docs/VC_TECH_STACK_PLAYBOOK.md)
+- [`architecture.md`](architecture.md)
+
+---
+
 ## Tech Stack
 
 **Frontend**
